@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GMGN 热门监控</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../../assets/icon-48.png" width="34" height="34" alt="">
+    <div><h1>GMGN 热门监控</h1><p>扩展已就绪</p></div>
+  </header>
+
+  <section class="summary" aria-label="监控概要">
+    <div><strong id="seenCount">0</strong><span>本地币种</span></div>
+    <div><strong id="eventCount">0</strong><span>历史提醒</span></div>
+    <div><strong id="updatedAt">--:--</strong><span>最近更新</span></div>
+  </section>
+
+  <main>
+    <label class="setting"><span><b>打开页面自动监控</b><small>首次榜单静默建立基线</small></span><input id="autoStart" type="checkbox" role="switch"></label>
+    <label class="setting"><span><b>声音提醒</b><small>发现新代币时播放</small></span><input id="sound" type="checkbox" role="switch"></label>
+    <label class="setting"><span><b>桌面通知</b><small>同时显示系统通知</small></span><input id="desktopNotifications" type="checkbox" role="switch"></label>
+    <label class="setting"><span><b>连接超时自动刷新</b><small>读取 GMGN 底部连接状态</small></span><input id="autoRefreshOnStall" type="checkbox" role="switch"></label>
+    <label class="setting"><span><b>成交额提醒名次</b><small>仅首次发现且进入前 N 名</small></span><span class="number-wrap"><input id="alertTopN" type="number" min="1" max="100" step="1"><i>名</i></span></label>
+    <label class="setting"><span><b>扫描间隔</b><small>页面变化也会立即扫描</small></span><select id="intervalSeconds"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></label>
+    <label class="setting"><span><b>连接异常等待</b><small>持续异常后才刷新</small></span><span class="number-wrap"><input id="connectionTimeoutSeconds" type="number" min="10" max="300" step="5"><i>秒</i></span></label>
+    <label class="setting"><span><b>缺席记录保留</b><small>连续未出现后自动删除</small></span><span class="number-wrap"><input id="retentionDays" type="number" min="1" max="365" step="1"><i>天</i></span></label>
+  </main>
+
+  <div class="actions">
+    <button id="testSound" class="secondary" type="button" title="试听提醒音">♪</button>
+    <button id="openGmgn" class="primary" type="button">打开 GMGN</button>
+  </div>
+  <div id="message" class="message" role="status"></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

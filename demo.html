@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-CN" data-gmgn-monitor-demo>
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GMGN 热门监控 - 本地测试</title>
+  <title>GMGN 扩展模块预览</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #0d100e; color: #e9ede7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; letter-spacing: 0; }
@@ -22,8 +22,9 @@
     .control-spacer { flex: 1; }
     .demo-action { color: #17200f; background: #c9f26b; border-color: #c9f26b; font-weight: 700; }
     .filter-action { color: #d9ded6; background: #1d211d; }
-    .table-shell { overflow: auto; border-top: 1px solid #343a33; border-bottom: 1px solid #343a33; }
-    table { width: 100%; border-collapse: collapse; min-width: 900px; }
+    .table-shell { position: relative; height: 500px; overflow: auto; border-top: 1px solid #343a33; border-bottom: 1px solid #343a33; }
+    .virtual-surface { position: relative; min-width: 900px; }
+    table { position: absolute; left: 0; width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 900px; background: #0d100e; }
     th { height: 42px; color: #7f887c; font-size: 11px; font-weight: 550; text-align: right; border-bottom: 1px solid #30352f; }
     th:first-child { text-align: left; }
     td { height: 68px; text-align: right; border-bottom: 1px solid #232823; color: #d7ddd4; font-size: 12px; }
@@ -38,14 +39,18 @@
     .up { color: #77d68d; }
     .gold { color: #e6bd66; }
     .note { margin-top: 13px; color: #717a6e; font-size: 11px; }
+    .connection-status { position: fixed; left: 18px; bottom: 14px; z-index: 20; }
+    .connection-pill { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 6px; color: #62d7a0; background: #173125; font-size: 11px; }
+    .connection-pill.unhealthy { color: #ff8e7c; background: #3a211d; }
+    .connection-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
   </style>
 </head>
 <body>
   <header class="topbar">
-    <div class="logo">GMGN · TEST</div>
+    <div class="logo">GMGN · EXTENSION</div>
     <nav><span>战壕</span><span class="active">热门</span><span>跟单</span><span>监控</span><span>追踪</span></nav>
     <span class="top-spacer"></span>
-    <a class="install" href="dist/gmgn-monitor.user.js">安装用户脚本</a>
+    <a class="install" href="extension/manifest.json">查看扩展配置</a>
   </header>
   <main>
     <div class="controls">
@@ -57,37 +62,138 @@
       <div class="tabs" id="periods">
         <button type="button">1m</button><button type="button">5m</button><button type="button" aria-selected="true">1h</button><button type="button">6h</button><button type="button">24h</button>
       </div>
-      <span class="control-spacer"></span>
       <button class="demo-action filter-action" id="applyFilter" type="button">应用</button>
-      <button class="demo-action" id="addToken" type="button">模拟新增代币</button>
+      <button class="demo-action" id="addToken" type="button">模拟第1名新币</button>
+      <button class="demo-action filter-action" id="addSixthToken" type="button">模拟第6名新币</button>
+      <button class="demo-action filter-action" id="toggleConnection" type="button">切换连接状态</button>
+      <span class="control-spacer"></span>
     </div>
-    <div class="table-shell">
-      <table>
+    <div class="table-shell gmgn-table-scroller gmgn-virtuoso" id="tableScroller">
+      <div class="virtual-surface" id="virtualSurface">
+      <table id="tokenTable">
         <thead><tr><th>币种 / 时间</th><th>市值</th><th>历史最高市值</th><th>池子</th><th>1h 成交额</th><th>1h 交易数</th><th>持有者</th><th>总手续费</th></tr></thead>
-        <tbody id="tokenRows">
-          <tr>
-            <td><a class="token" href="/robinhood/token/0x1111111111111111111111111111111111111111"><span class="coin">M</span><span class="token-main"><span class="token-name"><span title="MLG">MLG</span><span class="full-name">360noscope</span></span><span class="token-sub">18m · 0x111...1111</span></span></a></td>
-            <td class="up">$184.2K</td><td class="gold">$801.5K</td><td>$32.8K</td><td>$1.2M</td><td>8,421</td><td>914</td><td>3.71 ETH</td>
-          </tr>
-          <tr>
-            <td><a class="token" href="/robinhood/token/0x2222222222222222222222222222222222222222"><span class="coin">P</span><span class="token-main"><span class="token-name"><span title="PULSE">PULSE</span><span class="full-name">Market Pulse</span></span><span class="token-sub">31m · 0x222...2222</span></span></a></td>
-            <td class="up">$92.8K</td><td class="gold">$240.1K</td><td>$18.4K</td><td>$486K</td><td>3,218</td><td>420</td><td>1.22 ETH</td>
-          </tr>
-        </tbody>
+        <tbody id="tokenRows"></tbody>
       </table>
+      </div>
     </div>
-    <div class="note">本地测试数据 · 先开始监控，再点击“模拟新增代币”验证提醒。</div>
+    <div class="note">模块预览 · 页面适配器、监控引擎和控制面板均来自正式扩展源码。</div>
   </main>
-  <script src="src/core.js"></script>
-  <script src="src/userscript-app.js"></script>
-  <script>
-    let sequence = 3;
-    document.getElementById("addToken").addEventListener("click", () => {
-      const suffix = String(sequence).repeat(40);
-      const row = document.createElement("tr");
-      row.innerHTML = `<td><a class="token" href="/robinhood/token/0x${suffix}"><span class="coin">N</span><span class="token-main"><span class="token-name"><span title="NEW${sequence}">NEW${sequence}</span><span class="full-name">New Signal ${sequence}</span></span><span class="token-sub">1m · 0x${suffix.slice(0,3)}...${suffix.slice(-4)}</span></span></a></td><td class="up">$${sequence * 41}.5K</td><td class="gold">$${sequence * 83}K</td><td>$21K</td><td>$${sequence * 208}K</td><td>${sequence * 1200}</td><td>${sequence * 96}</td><td>0.${sequence} ETH</td>`;
-      document.getElementById("tokenRows").prepend(row);
+  <footer class="connection-status" role="contentinfo">
+    <div class="connection-pill" id="connectionPill"><span class="connection-dot"></span><span id="connectionStatusText">Stable</span><span id="connectionLatency">16 MS</span><span>60 FPS</span></div>
+  </footer>
+  <script type="module">
+    import { DEFAULT_SETTINGS, LIMITS } from "./extension/src/shared/constants.js";
+    import { playAlertTone } from "./extension/src/shared/alert-tone.js";
+    import { applyScanToState, createDataState } from "./extension/src/shared/scan-state.js";
+    import { GmgnTrendAdapter } from "./extension/src/content/adapters/gmgn-trend-adapter.js";
+    import { MonitorEngine } from "./extension/src/content/core/monitor-engine.js";
+    import { ConnectionWatchdog } from "./extension/src/content/core/connection-watchdog.js";
+    import { MonitorPanel } from "./extension/src/content/ui/monitor-panel.js";
+
+    class DemoGateway {
+      constructor() {
+        this.settings = { ...DEFAULT_SETTINGS };
+        this.data = createDataState();
+        this.listeners = new Set();
+      }
+      async getBootstrap() {
+        return { settings: this.settings, summary: { totalSeen: 0, recentEvents: [], updatedAt: 0, requiresBaseline: true } };
+      }
+      async processScan(tokens, baseline, completeSnapshot) {
+        const result = applyScanToState(this.data, tokens, { baseline, completeSnapshot, now: Date.now(), maxEvents: LIMITS.MAX_EVENTS, retentionDays: this.settings.retentionDays, alertTopN: this.settings.alertTopN });
+        this.data = result.state;
+        return result.report;
+      }
+      async updateSettings(patch) {
+        this.settings = { ...this.settings, ...patch };
+        this.listeners.forEach((listener) => listener(this.settings));
+        return this.settings;
+      }
+      async testSound() {
+        const context = new AudioContext();
+        playAlertTone(context);
+      }
+      async getExportData() {
+        return { settings: this.settings, tokens: Object.values(this.data.tokens), events: this.data.events };
+      }
+      async clearData() {
+        this.data = createDataState();
+        return { totalSeen: 0, recentEvents: [], updatedAt: 0 };
+      }
+      async updateBadge() {}
+      onSettingsChanged(listener) {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+      }
+    }
+
+    const engine = new MonitorEngine({
+      source: new GmgnTrendAdapter(),
+      gateway: new DemoGateway(),
+      watchdog: new ConnectionWatchdog({ reload: () => console.info("[连接健康] 预览页跳过实际刷新") }),
+    });
+    new MonitorPanel(engine).mount(document.documentElement);
+    engine.initialize().catch((error) => engine.fail(error));
+
+    const ROW_HEIGHT = 68;
+    const HEADER_HEIGHT = 42;
+    const WINDOW_SIZE = 10;
+    const tableScroller = document.getElementById("tableScroller");
+    const virtualSurface = document.getElementById("virtualSurface");
+    const tokenTable = document.getElementById("tokenTable");
+    const tokenRows = document.getElementById("tokenRows");
+    let sequence = 43;
+    const tokens = Array.from({ length: 42 }, (_, index) => {
+      const number = index + 1;
+      const address = number.toString(16).padStart(40, "0");
+      return {
+        address,
+        symbol: number === 1 ? "MLG" : number === 2 ? "PULSE" : `COIN${number}`,
+        name: number === 1 ? "360noscope" : number === 2 ? "Market Pulse" : `Rank Token ${number}`,
+        age: `${(number % 58) + 1}m`,
+        marketCap: (43 - number) * 41,
+      };
+    });
+
+    function rowMarkup(token, absoluteIndex) {
+      const short = `${token.address.slice(0, 5)}...${token.address.slice(-4)}`;
+      return `<tr data-index="${absoluteIndex}" data-item-index="${absoluteIndex}"><td><a class="token" href="/robinhood/token/0x${token.address}"><span class="coin">${token.symbol.slice(0, 1)}</span><span class="token-main"><span class="token-name"><span title="${token.symbol}">${token.symbol}</span><span class="full-name">${token.name}</span></span><span class="token-sub">${token.age} · ${short}</span></span></a></td><td class="up">$${token.marketCap}.5K</td><td class="gold">$${token.marketCap * 2}K</td><td>$21K</td><td>$${token.marketCap * 5}K</td><td>${token.marketCap * 12}</td><td>${token.marketCap}</td><td>0.8 ETH</td></tr>`;
+    }
+
+    function renderVirtualWindow() {
+      const first = Math.max(0, Math.min(tokens.length - WINDOW_SIZE, Math.floor(tableScroller.scrollTop / ROW_HEIGHT)));
+      const visible = tokens.slice(first, first + WINDOW_SIZE);
+      tokenTable.style.top = `${first * ROW_HEIGHT}px`;
+      tokenRows.innerHTML = visible.map((token, index) => rowMarkup(token, first + index)).join("");
+      virtualSurface.style.height = `${tokens.length * ROW_HEIGHT + HEADER_HEIGHT}px`;
+    }
+
+    tableScroller.addEventListener("scroll", renderVirtualWindow, { passive: true });
+    renderVirtualWindow();
+
+    function createNewToken() {
+      const address = sequence.toString(16).padStart(40, "0");
+      const token = { address, symbol: `NEW${sequence}`, name: `New Signal ${sequence}`, age: "1m", marketCap: sequence * 41 };
       sequence += 1;
+      return token;
+    }
+
+    document.getElementById("addToken").addEventListener("click", () => {
+      tokens.unshift(createNewToken());
+      renderVirtualWindow();
+    });
+    document.getElementById("addSixthToken").addEventListener("click", () => {
+      tokens.splice(5, 0, createNewToken());
+      renderVirtualWindow();
+    });
+    document.getElementById("toggleConnection").addEventListener("click", () => {
+      const status = document.getElementById("connectionStatusText");
+      const latency = document.getElementById("connectionLatency");
+      const pill = document.getElementById("connectionPill");
+      const healthy = status.textContent === "Stable";
+      status.textContent = healthy ? "Timeout" : "Stable";
+      latency.textContent = healthy ? "999 MS" : "16 MS";
+      pill.classList.toggle("unhealthy", healthy);
     });
     document.querySelectorAll("#periods button").forEach((button) => button.addEventListener("click", () => {
       document.querySelectorAll("#periods button").forEach((item) => item.removeAttribute("aria-selected"));

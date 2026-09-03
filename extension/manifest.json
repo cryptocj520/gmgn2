@@ -1,0 +1,54 @@
+{
+  "manifest_version": 3,
+  "name": "GMGN 热门币监控",
+  "version": "0.6.1",
+  "description": "读取 GMGN 当前筛选后的热门榜，发现新代币时发出声音提醒。",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "notifications",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "https://gmgn.ai/*"
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "GMGN 热门币监控",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://gmgn.ai/trend*"],
+      "js": ["src/content/loader.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/shared/*.js",
+        "src/content/*.js",
+        "src/content/adapters/*.js",
+        "src/content/core/*.js",
+        "src/content/ui/*.js"
+      ],
+      "matches": ["https://gmgn.ai/*"]
+    }
+  ]
+}
