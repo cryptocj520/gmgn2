@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN" data-gmgn-monitor-demo>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GMGN 热门监控 - 本地测试</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #0d100e; color: #e9ede7; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; letter-spacing: 0; }
+    button, a { font: inherit; letter-spacing: 0; }
+    .topbar { height: 58px; display: flex; align-items: center; gap: 24px; padding: 0 22px; border-bottom: 1px solid #2b302a; background: #121512; }
+    .logo { font-size: 16px; font-weight: 800; color: #d4f77e; }
+    nav { display: flex; gap: 19px; color: #939c90; font-size: 13px; }
+    nav .active { color: #e4f99f; }
+    .top-spacer { flex: 1; }
+    .install { color: #d4f77e; text-decoration: none; font-size: 12px; }
+    main { max-width: 1160px; margin: 0 auto; padding: 28px 22px; }
+    .controls { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+    .tabs { display: flex; gap: 4px; }
+    .tabs button, .demo-action { height: 32px; border: 1px solid #343a33; border-radius: 6px; padding: 0 11px; background: #171b17; color: #aab2a6; cursor: pointer; }
+    .tabs button[aria-selected="true"] { background: #292e27; color: #fff; }
+    .control-spacer { flex: 1; }
+    .demo-action { color: #17200f; background: #c9f26b; border-color: #c9f26b; font-weight: 700; }
+    .filter-action { color: #d9ded6; background: #1d211d; }
+    .table-shell { overflow: auto; border-top: 1px solid #343a33; border-bottom: 1px solid #343a33; }
+    table { width: 100%; border-collapse: collapse; min-width: 900px; }
+    th { height: 42px; color: #7f887c; font-size: 11px; font-weight: 550; text-align: right; border-bottom: 1px solid #30352f; }
+    th:first-child { text-align: left; }
+    td { height: 68px; text-align: right; border-bottom: 1px solid #232823; color: #d7ddd4; font-size: 12px; }
+    td:first-child { text-align: left; }
+    .token { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
+    .coin { width: 38px; height: 38px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 6px; color: #15200d; background: #c9f26b; font-weight: 850; }
+    .token-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .token-name { display: flex; align-items: baseline; gap: 7px; }
+    .token-name [title] { font-weight: 750; color: #f4f6f2; }
+    .full-name { color: #899284; }
+    .token-sub { color: #7c8579; font-size: 11px; }
+    .up { color: #77d68d; }
+    .gold { color: #e6bd66; }
+    .note { margin-top: 13px; color: #717a6e; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="logo">GMGN · TEST</div>
+    <nav><span>战壕</span><span class="active">热门</span><span>跟单</span><span>监控</span><span>追踪</span></nav>
+    <span class="top-spacer"></span>
+    <a class="install" href="dist/gmgn-monitor.user.js">安装用户脚本</a>
+  </header>
+  <main>
+    <div class="controls">
+      <div class="tabs">
+        <button role="tab" type="button">新币</button>
+        <button role="tab" type="button" aria-selected="true">热门</button>
+        <button role="tab" type="button">热搜</button>
+      </div>
+      <div class="tabs" id="periods">
+        <button type="button">1m</button><button type="button">5m</button><button type="button" aria-selected="true">1h</button><button type="button">6h</button><button type="button">24h</button>
+      </div>
+      <span class="control-spacer"></span>
+      <button class="demo-action filter-action" id="applyFilter" type="button">应用</button>
+      <button class="demo-action" id="addToken" type="button">模拟新增代币</button>
+    </div>
+    <div class="table-shell">
+      <table>
+        <thead><tr><th>币种 / 时间</th><th>市值</th><th>历史最高市值</th><th>池子</th><th>1h 成交额</th><th>1h 交易数</th><th>持有者</th><th>总手续费</th></tr></thead>
+        <tbody id="tokenRows">
+          <tr>
+            <td><a class="token" href="/robinhood/token/0x1111111111111111111111111111111111111111"><span class="coin">M</span><span class="token-main"><span class="token-name"><span title="MLG">MLG</span><span class="full-name">360noscope</span></span><span class="token-sub">18m · 0x111...1111</span></span></a></td>
+            <td class="up">$184.2K</td><td class="gold">$801.5K</td><td>$32.8K</td><td>$1.2M</td><td>8,421</td><td>914</td><td>3.71 ETH</td>
+          </tr>
+          <tr>
+            <td><a class="token" href="/robinhood/token/0x2222222222222222222222222222222222222222"><span class="coin">P</span><span class="token-main"><span class="token-name"><span title="PULSE">PULSE</span><span class="full-name">Market Pulse</span></span><span class="token-sub">31m · 0x222...2222</span></span></a></td>
+            <td class="up">$92.8K</td><td class="gold">$240.1K</td><td>$18.4K</td><td>$486K</td><td>3,218</td><td>420</td><td>1.22 ETH</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="note">本地测试数据 · 先开始监控，再点击“模拟新增代币”验证提醒。</div>
+  </main>
+  <script src="src/core.js"></script>
+  <script src="src/userscript-app.js"></script>
+  <script>
+    let sequence = 3;
+    document.getElementById("addToken").addEventListener("click", () => {
+      const suffix = String(sequence).repeat(40);
+      const row = document.createElement("tr");
+      row.innerHTML = `<td><a class="token" href="/robinhood/token/0x${suffix}"><span class="coin">N</span><span class="token-main"><span class="token-name"><span title="NEW${sequence}">NEW${sequence}</span><span class="full-name">New Signal ${sequence}</span></span><span class="token-sub">1m · 0x${suffix.slice(0,3)}...${suffix.slice(-4)}</span></span></a></td><td class="up">$${sequence * 41}.5K</td><td class="gold">$${sequence * 83}K</td><td>$21K</td><td>$${sequence * 208}K</td><td>${sequence * 1200}</td><td>${sequence * 96}</td><td>0.${sequence} ETH</td>`;
+      document.getElementById("tokenRows").prepend(row);
+      sequence += 1;
+    });
+    document.querySelectorAll("#periods button").forEach((button) => button.addEventListener("click", () => {
+      document.querySelectorAll("#periods button").forEach((item) => item.removeAttribute("aria-selected"));
+      button.setAttribute("aria-selected", "true");
+    }));
+  </script>
+</body>
+</html>
