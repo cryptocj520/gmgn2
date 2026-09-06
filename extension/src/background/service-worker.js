@@ -1,19 +1,27 @@
 import { AlertService } from "./alert-service.js";
 import { DataRepository } from "./data-repository.js";
-import { GrokNarrativeService } from "./grok-narrative-service.js";
+import { LocalAnalysisClient } from "./local-analysis-client.js";
 import { NarrativeCoordinator } from "./narrative-coordinator.js";
+import { OffscreenBridgeClient } from "./offscreen-bridge-client.js";
 import { SecretVault } from "./secret-vault.js";
 import { MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
 
 const repository = new DataRepository();
 const alerts = new AlertService();
 const secretVault = new SecretVault();
-const narratives = new NarrativeCoordinator(repository, new GrokNarrativeService(), secretVault);
+const offscreenBridge = new OffscreenBridgeClient();
+const localAnalyzer = new LocalAnalysisClient(offscreenBridge);
+const narratives = new NarrativeCoordinator(repository, localAnalyzer, secretVault);
 
 const handlers = {
   [MESSAGE.GET_BOOTSTRAP]: async () => {
     const bootstrap = await repository.getBootstrap();
-    bootstrap.integrations.grokConfigured = await secretVault.isGrokConfigured();
+    const [grokConfigured, bridgeConfigured] = await Promise.all([
+      secretVault.isGrokConfigured(),
+      secretVault.isBridgeConfigured(),
+    ]);
+    bootstrap.integrations.grokConfigured = grokConfigured;
+    bootstrap.integrations.bridgeConfigured = bridgeConfigured;
     return bootstrap;
   },
   [MESSAGE.PROCESS_SCAN]: async (message, sender) => {
@@ -45,13 +53,14 @@ const handlers = {
     await chrome.action.setBadgeText({ tabId: sender.tab.id, text });
     return null;
   },
-  [MESSAGE.SAVE_GROK_API_KEY]: (message) => narratives.validateAndSaveApiKey(message.apiKey, {
-    grokBaseUrl: message.grokBaseUrl,
-    grokModel: message.grokModel,
-  }),
-  [MESSAGE.CLEAR_GROK_API_KEY]: () => narratives.clearApiKey(),
   [MESSAGE.TEST_GROK_API]: () => narratives.testApiKey(),
   [MESSAGE.RETRY_NARRATIVE]: (message) => narratives.retryNarrative(message.tokenId, message.detectedAt),
+  [MESSAGE.MANUAL_NARRATIVE]: (message) => narratives.queueManual(message.token),
+  [MESSAGE.SAVE_LOCAL_ANALYZER]: (message) => narratives.saveLocalConnection({
+    bridgeBaseUrl: message.bridgeBaseUrl,
+    bridgeToken: message.bridgeToken,
+  }),
+  [MESSAGE.MIGRATE_LEGACY_AI_CONFIG]: () => narratives.migrateLegacyConfig(),
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

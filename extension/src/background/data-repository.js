@@ -1,6 +1,11 @@
 import { DATA_SCHEMA_VERSION, DEFAULT_SETTINGS, LIMITS, STORAGE_KEYS } from "../shared/constants.js";
 import { applyScanToState, createDataState } from "../shared/scan-state.js";
-import { normalizeGrokBaseUrl, normalizeGrokModel } from "../shared/grok-config.js";
+import {
+  normalizeBridgeBaseUrl,
+  normalizeGrokApiMode,
+  normalizeGrokBaseUrl,
+  normalizeGrokModel,
+} from "../shared/grok-config.js";
 
 export class DataRepository {
   constructor(storageArea = chrome.storage.local) {
@@ -11,6 +16,8 @@ export class DataRepository {
       grokConfigured: false,
       grokModel: DEFAULT_SETTINGS.grokModel,
       grokBaseUrl: DEFAULT_SETTINGS.grokBaseUrl,
+      bridgeConfigured: false,
+      bridgeBaseUrl: DEFAULT_SETTINGS.bridgeBaseUrl,
     };
     this.requiresBaseline = true;
     this.ready = null;
@@ -43,14 +50,20 @@ export class DataRepository {
     try {
       this.settings.grokBaseUrl = normalizeGrokBaseUrl(this.settings.grokBaseUrl);
       this.settings.grokModel = normalizeGrokModel(this.settings.grokModel);
+      this.settings.grokApiMode = normalizeGrokApiMode(this.settings.grokApiMode);
+      this.settings.bridgeBaseUrl = normalizeBridgeBaseUrl(this.settings.bridgeBaseUrl);
     } catch (_) {
       this.settings.grokBaseUrl = DEFAULT_SETTINGS.grokBaseUrl;
       this.settings.grokModel = DEFAULT_SETTINGS.grokModel;
+      this.settings.grokApiMode = DEFAULT_SETTINGS.grokApiMode;
+      this.settings.bridgeBaseUrl = DEFAULT_SETTINGS.bridgeBaseUrl;
     }
     this.integrations = {
       grokConfigured: Boolean(stored[STORAGE_KEYS.INTEGRATIONS]?.grokConfigured),
       grokModel: this.settings.grokModel,
       grokBaseUrl: this.settings.grokBaseUrl,
+      bridgeConfigured: Boolean(stored[STORAGE_KEYS.INTEGRATIONS]?.bridgeConfigured),
+      bridgeBaseUrl: this.settings.bridgeBaseUrl,
     };
   }
 
@@ -119,11 +132,18 @@ export class DataRepository {
     if (Object.hasOwn(allowed, "grokModel")) {
       allowed.grokModel = normalizeGrokModel(allowed.grokModel);
     }
+    if (Object.hasOwn(allowed, "grokApiMode")) {
+      allowed.grokApiMode = normalizeGrokApiMode(allowed.grokApiMode);
+    }
+    if (Object.hasOwn(allowed, "bridgeBaseUrl")) {
+      allowed.bridgeBaseUrl = normalizeBridgeBaseUrl(allowed.bridgeBaseUrl);
+    }
     this.settings = { ...this.settings, ...allowed };
     this.integrations = {
       ...this.integrations,
       grokModel: this.settings.grokModel,
       grokBaseUrl: this.settings.grokBaseUrl,
+      bridgeBaseUrl: this.settings.bridgeBaseUrl,
     };
     await this.storage.set({
       [STORAGE_KEYS.SETTINGS]: this.settings,
@@ -142,11 +162,14 @@ export class DataRepository {
 
   async setGrokConfigured(configured) {
     await this.initialize();
-    this.integrations = {
-      grokConfigured: Boolean(configured),
-      grokModel: this.settings.grokModel,
-      grokBaseUrl: this.settings.grokBaseUrl,
-    };
+    this.integrations = { ...this.integrations, grokConfigured: Boolean(configured) };
+    await this.storage.set({ [STORAGE_KEYS.INTEGRATIONS]: this.integrations });
+    return { ...this.integrations };
+  }
+
+  async setBridgeConfigured(configured) {
+    await this.initialize();
+    this.integrations = { ...this.integrations, bridgeConfigured: Boolean(configured) };
     await this.storage.set({ [STORAGE_KEYS.INTEGRATIONS]: this.integrations });
     return { ...this.integrations };
   }
@@ -177,6 +200,20 @@ export class DataRepository {
     });
   }
 
+  async createManualNarrativeEvent(token) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const now = Date.now();
+      const event = { ...token, detectedAt: now, manual: true };
+      this.data = {
+        ...this.data,
+        events: [event, ...this.data.events].slice(0, LIMITS.MAX_EVENTS),
+        updatedAt: now,
+      };
+      return event;
+    });
+  }
+
   async markNarrativesWaitingForKey(tokens) {
     await this.initialize();
     return this.runDataWrite(() => {
@@ -199,6 +236,11 @@ export class DataRepository {
   async getNarrativeJobs() {
     await this.initialize();
     return Object.values(this.data.narrativeJobs);
+  }
+
+  async getWaitingNarrativeEvents() {
+    await this.initialize();
+    return this.data.events.filter((event) => event.narrative?.status === "waiting_key");
   }
 
   async getNarrativeEvent(tokenId, detectedAt) {

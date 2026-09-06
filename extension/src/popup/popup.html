@@ -36,19 +36,18 @@
     </main>
 
     <section class="pane narrative-pane" id="narrativePane">
-      <div class="integration-head"><div><b>Grok API</b><small id="grokModel">grok-4.6</small></div><span class="api-status" id="grokStatus">未配置</span></div>
+      <div class="integration-head"><div><b>本地分析服务</b><small>AI 配置与插件分离</small></div><span class="api-status" id="analyzerStatus">未连接</span></div>
       <label class="setting"><span><b>自动叙事分析</b><small>仅分析触发提醒的代币</small></span><input id="narrativeEnabled" type="checkbox" role="switch"></label>
-      <label class="setting"><span><b>X 即时搜索</b><small>获取最新帖子、账号和讨论</small></span><input id="grokEnableXSearch" type="checkbox" role="switch"></label>
-      <div class="config-fields">
-        <label><span>GROK_MODELS_BASE_URL</span><input id="grokBaseUrl" type="url" placeholder="https://example.com/v1" autocomplete="off" spellcheck="false"></label>
-        <label><span>模型名称</span><input id="grokModelInput" type="text" placeholder="grok-4.6" autocomplete="off" spellcheck="false"></label>
+      <div class="bridge-section">
+        <div class="section-title"><label for="bridgeBaseUrl">本地分析地址</label><span class="api-status" id="bridgeStatus">未配对</span></div>
+        <input id="bridgeBaseUrl" type="url" placeholder="http://127.0.0.1:18761" autocomplete="off" spellcheck="false">
+        <div class="key-row"><input id="bridgeToken" type="password" placeholder="运行服务后显示的配对令牌" autocomplete="off" spellcheck="false"><button id="toggleBridgeToken" type="button" title="显示或隐藏配对令牌">◉</button></div>
+        <p>插件只发送公开代币数据，本地服务独立调用并解析 AI。</p>
       </div>
-      <div class="key-section">
-        <label for="grokApiKey">XAI_API_KEY</label>
-        <div class="key-row"><input id="grokApiKey" type="password" placeholder="xai-..." autocomplete="off" spellcheck="false"><button id="toggleKey" type="button" title="显示或隐藏 API Key">◉</button></div>
-        <p>密钥仅保存在扩展私有存储中，不会发送给 GMGN，也不会包含在数据导出中。触发提醒后，公开代币信息会发送给 xAI。</p>
-      </div>
-      <div class="key-actions"><button id="saveGrokKey" class="primary" type="button">保存并验证</button><button id="testGrokKey" class="secondary text" type="button">验证现有密钥</button><button id="clearGrokKey" class="danger" type="button">移除</button></div>
+      <div class="local-actions"><button id="saveAnalyzer" class="primary" type="button">保存连接</button><button id="testAnalyzer" class="secondary text" type="button">测试服务</button></div>
+      <button id="openAnalyzerSettings" class="secondary wide" type="button">打开本地 AI 设置</button>
+      <button id="migrateLegacyConfig" class="migration-action" type="button">迁移插件中的旧 API 配置</button>
+      <button id="manualTopNarrative" class="manual-action" type="button">手动分析当前榜首</button>
     </section>
   </div>
 

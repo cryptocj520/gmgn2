@@ -51,14 +51,15 @@ export class MonitorPanel {
           <div class="stat"><span class="stat-value" id="scanValue">--:--</span><span class="stat-label">最近扫描</span></div>
         </div>
         <div class="content"><div class="section-head"><span class="section-title">提醒记录</span><span class="section-count" id="eventCount">0 条</span></div><div class="events" id="events"></div></div>
-        <footer class="footer"><span class="footer-state"></span><span>全局合约去重 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.7.1</span></footer>
+        <footer class="footer"><span class="footer-state"></span><span>全局合约去重 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.13.1</span></footer>
         <aside class="settings" id="settingsPanel">
           <h2 class="settings-title">监控设置</h2>
           ${this.toggleSetting("autoStartToggle", "打开页面自动监控", "首次榜单仍会静默建立基线")}
           ${this.toggleSetting("desktopToggle", "桌面通知", "声音以外再显示系统通知")}
           ${this.toggleSetting("autoRefreshToggle", "连接超时自动刷新", "读取 GMGN 底部连接状态")}
           ${this.toggleSetting("narrativeToggle", "自动叙事分析", "报警后调用 Grok 分析")}
-          <div class="setting-row"><div class="setting-main"><div class="setting-name">Grok API</div><div class="setting-note">密钥保存在扩展私有存储</div></div><span class="api-state" id="narrativeApiState">未配置</span></div>
+          <div class="setting-row"><div class="setting-main"><div class="setting-name">本地分析服务</div><div class="setting-note">插件只发送公开代币数据</div></div><span class="api-state" id="narrativeApiState">未配对</span></div>
+          <button class="action-button manual-analysis" id="manualNarrativeButton" type="button">手动分析当前榜首</button>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">成交额提醒名次</div><div class="setting-note">仅首次发现且进入前 N 名</div></div><input class="number-input" id="alertTopN" type="number" min="1" max="100" step="1" aria-label="成交额提醒前几名"><span class="unit">名</span></div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">扫描间隔</div><div class="setting-note">页面变化也会触发扫描</div></div><select id="intervalSelect" aria-label="扫描间隔"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">连接异常等待</div><div class="setting-note">持续异常后才自动刷新</div></div><input class="number-input" id="connectionTimeoutSeconds" type="number" min="10" max="300" step="5" aria-label="连接异常等待秒数"><span class="unit">秒</span></div>
@@ -71,10 +72,12 @@ export class MonitorPanel {
             <div class="detail-status" id="detailStatus"></div>
             <div id="detailContent">
               <div class="detail-intro"><div class="detail-kicker"><span id="detailConfidence">--</span><span id="detailAnalyzedAt">--</span></div><h2 id="detailTitle">--</h2><p id="detailSummary"></p><div class="tag-list" id="detailTags"></div></div>
-              <section class="detail-section"><h3>叙事说明</h3><p class="narrative-copy" id="detailNarrative"></p></section>
-              <section class="detail-section potential-section"><div class="potential-heading"><h3>潜力观察</h3><span id="detailOutlook">--</span></div><p class="narrative-copy" id="detailPotential"></p><div class="potential-grid"><div><h4>可能催化剂</h4><ul id="detailCatalysts"></ul></div><div><h4>失效信号</h4><ul id="detailInvalidations"></ul></div><div><h4>后续观察</h4><ul id="detailWatchItems"></ul></div></div></section>
-              <section class="detail-section"><h3>判断依据</h3><div id="detailEvidence"></div></section>
-              <section class="detail-section risk-section"><h3>主要风险</h3><ul id="detailRisks"></ul></section>
+              <section class="detail-section story-section"><h3>故事背景</h3><p class="narrative-copy" id="detailNarrative"></p><div class="story-grid"><div><h4>关键人物 / 事件</h4><p id="detailStoryPeople"></p></div><div><h4>为什么现在走热</h4><p id="detailStoryWhyNow"></p></div></div><div class="timeline" id="detailStoryTimeline"></div></section>
+              <section class="detail-section sentiment-section"><div class="sentiment-heading"><h3>X 上的真实舆情</h3><span id="detailXSearchStatus">--</span></div><p class="x-overview" id="detailXOverview"></p><div class="sentiment-grid"><div><h4>正面观点</h4><div id="detailPositive"></div></div><div class="negative-column"><h4>负面观点</h4><div id="detailNegative"></div></div></div></section>
+              <section class="detail-section verification-section"><h3>哪些可信，哪些只是说法</h3><div class="verification-grid"><div><h4>已确认</h4><ul id="detailConfirmed"></ul></div><div><h4>项目方自述</h4><ul id="detailClaims"></ul></div><div><h4>仍未确认</h4><ul id="detailUnknowns"></ul></div></div></section>
+              <section class="detail-section potential-section"><div class="potential-heading"><h3>故事能否延续</h3><span id="detailOutlook">观察项</span></div><div class="potential-grid"><div><h4>延续条件</h4><ul id="detailCatalysts"></ul></div><div><h4>破坏故事的信号</h4><ul id="detailInvalidations"></ul></div><div><h4>下一步看什么</h4><ul id="detailWatchItems"></ul></div></div></section>
+              <section class="detail-section market-section"><h3>市场背景</h3><p class="narrative-copy" id="detailMarketContext"></p></section>
+              <section class="detail-section risk-section"><h3>交易风险（次要参考）</h3><ul id="detailRisks"></ul></section>
               <section class="detail-section"><h3>信息来源</h3><div class="source-list" id="detailSources"></div></section>
             </div>
             <button class="action-button" id="retryNarrative" type="button">重新分析</button>
@@ -97,9 +100,12 @@ export class MonitorPanel {
       "connectionTimeoutSeconds", "retentionDays", "alertTopN",
       "narrativeApiState", "exportButton", "clearButton", "toast", "narrativeDetail", "detailBack",
       "detailSymbol", "detailMeta", "detailTokenLink", "detailStatus", "detailContent", "detailConfidence",
-      "detailAnalyzedAt", "detailTitle", "detailSummary", "detailTags", "detailNarrative", "detailEvidence",
-      "detailPotential", "detailOutlook", "detailCatalysts", "detailInvalidations", "detailWatchItems",
-      "detailRisks", "detailSources", "retryNarrative",
+      "detailAnalyzedAt", "detailTitle", "detailSummary", "detailTags", "detailNarrative",
+      "detailOutlook", "detailCatalysts", "detailInvalidations", "detailWatchItems",
+      "detailXSearchStatus", "detailXOverview", "detailPositive", "detailNegative",
+      "detailStoryPeople", "detailStoryWhyNow", "detailStoryTimeline", "detailMarketContext",
+      "detailConfirmed", "detailClaims", "detailUnknowns",
+      "detailRisks", "detailSources", "retryNarrative", "manualNarrativeButton",
     ];
     this.elements = Object.fromEntries(ids.map((id) => [id, this.shadow.getElementById(id)]));
   }
@@ -165,6 +171,7 @@ export class MonitorPanel {
     this.elements.clearButton.addEventListener("click", () => this.clearData());
     this.elements.detailBack.addEventListener("click", () => this.closeNarrative());
     this.elements.retryNarrative.addEventListener("click", () => this.retrySelectedNarrative());
+    this.elements.manualNarrativeButton.addEventListener("click", () => this.analyzeTopToken());
   }
 
   bindSetting(elementId, key) {
@@ -253,7 +260,7 @@ export class MonitorPanel {
     symbol.textContent = event.symbol || "未知代币";
     const chain = document.createElement("span");
     chain.className = "chain";
-    chain.textContent = event.chain;
+    chain.textContent = event.manual ? `${event.chain} · 手动` : event.chain;
     nameLine.append(symbol, chain);
     const meta = document.createElement("span");
     meta.className = "event-meta";
@@ -278,7 +285,7 @@ export class MonitorPanel {
     const states = {
       queued: "Grok 分析排队中…",
       retrying: "Grok 分析重试中…",
-      waiting_key: "等待配置 Grok API",
+      waiting_key: "等待配置本地分析服务",
       cancelled: "自动叙事分析已关闭",
       failed: "叙事分析失败 · 点击查看",
     };
@@ -290,8 +297,8 @@ export class MonitorPanel {
   renderIntegration(integration) {
     if (!integration) return;
     this.integration = integration;
-    this.elements.narrativeApiState.textContent = integration.grokConfigured ? "已配置" : "未配置";
-    this.elements.narrativeApiState.classList.toggle("ready", integration.grokConfigured);
+    this.elements.narrativeApiState.textContent = integration.bridgeConfigured ? "已配对" : "未配对";
+    this.elements.narrativeApiState.classList.toggle("ready", integration.bridgeConfigured);
   }
 
   openNarrative(event) {
@@ -318,13 +325,14 @@ export class MonitorPanel {
   renderNarrativeDetail(event) {
     this.selectedEvent = event;
     this.elements.detailSymbol.textContent = event.symbol || "未知代币";
-    this.elements.detailMeta.textContent = `${event.chain.toUpperCase()} · 第 ${event.rank || "--"} 名 · ${event.volumePeriod || "--"}成交额 ${event.volume || "--"}`;
+    const mode = event.manual ? "手动分析 · " : "";
+    this.elements.detailMeta.textContent = `${mode}${event.chain.toUpperCase()} · 第 ${event.rank || "--"} 名 · ${event.volumePeriod || "--"}成交额 ${event.volume || "--"}`;
     this.elements.detailTokenLink.href = event.url;
     const narrative = event.narrative;
     const statusText = {
       queued: "Grok 正在搜索公开资料并生成叙事分析…",
       retrying: "首次请求失败，正在进行最后一次重试…",
-      waiting_key: "尚未配置 Grok API Key。配置后可手动重新分析本条提醒。",
+      waiting_key: "尚未配置本地分析服务。配对后可手动重新分析本条提醒。",
       cancelled: narrative?.error || "自动叙事分析已关闭",
       failed: narrative?.error || "叙事分析失败",
     };
@@ -333,7 +341,7 @@ export class MonitorPanel {
     this.elements.detailStatus.className = `detail-status ${narrative?.status || "idle"}`;
     this.elements.detailContent.hidden = !ready;
     const canRetry = ["ready", "failed", "cancelled"].includes(narrative?.status) ||
-      (narrative?.status === "waiting_key" && this.integration?.grokConfigured);
+      (narrative?.status === "waiting_key" && this.integration?.bridgeConfigured);
     this.elements.retryNarrative.hidden = !canRetry;
     if (!ready) return;
 
@@ -344,10 +352,12 @@ export class MonitorPanel {
     this.elements.detailAnalyzedAt.textContent = `分析于 ${formatClock(analysis.analyzedAt)}`;
     this.elements.detailTitle.textContent = analysis.title;
     this.elements.detailSummary.textContent = analysis.summary;
-    this.elements.detailNarrative.textContent = analysis.narrative;
-    this.renderPotential(analysis.potential || {});
+    this.renderStory(analysis.story || { origin: analysis.narrative });
+    this.renderXSentiment(analysis.xSentiment || {});
+    this.renderVerification(analysis.verification || {});
+    this.renderContinuation(analysis.continuation || {});
+    this.elements.detailMarketContext.textContent = analysis.marketContext || "暂无需要补充的市场背景";
     this.renderTags(analysis.tags || []);
-    this.renderEvidence(analysis.evidence || []);
     this.renderRisks(analysis.risks || []);
     this.renderSources(analysis.sources || []);
   }
@@ -360,33 +370,65 @@ export class MonitorPanel {
     }));
   }
 
-  renderEvidence(evidence) {
-    const items = evidence.map((item) => {
+  renderStory(story) {
+    this.elements.detailNarrative.textContent = story.origin || "尚未找到可验证的故事来源";
+    this.elements.detailStoryPeople.textContent = story.keyPeopleOrEvent || "暂无可验证信息";
+    this.elements.detailStoryWhyNow.textContent = story.whyNow || "尚不清楚为何此刻走热";
+    const timeline = (story.timeline || []).map((item) => {
       const row = document.createElement("div");
-      row.className = "evidence-row";
-      const point = document.createElement("p");
-      point.textContent = item.point;
-      row.appendChild(point);
-      if (item.url) row.appendChild(this.sourceLink(item.url, "依据来源 ↗"));
+      row.className = "timeline-row";
+      const time = document.createElement("span");
+      time.textContent = item.time || "时间未知";
+      const event = document.createElement("p");
+      event.textContent = item.event;
+      row.append(time, event);
+      if (item.url) row.appendChild(this.sourceLink(item.url, "来源 ↗"));
       return row;
     });
-    this.elements.detailEvidence.replaceChildren(...items);
+    this.elements.detailStoryTimeline.replaceChildren(...timeline);
   }
 
-  renderPotential(potential) {
-    const outlooks = {
-      strong: "潜力较强",
-      moderate: "潜力中等",
-      speculative: "高度投机",
-      weak: "潜力偏弱",
-      unknown: "信息不足",
-    };
-    this.elements.detailOutlook.textContent = outlooks[potential.outlook] || outlooks.unknown;
-    this.elements.detailOutlook.dataset.level = potential.outlook || "unknown";
-    this.elements.detailPotential.textContent = potential.rationale || "现有公开信息不足以形成可靠潜力判断";
-    this.renderTextList(this.elements.detailCatalysts, potential.catalysts || []);
-    this.renderTextList(this.elements.detailInvalidations, potential.invalidationSignals || []);
-    this.renderTextList(this.elements.detailWatchItems, potential.watchItems || []);
+  renderXSentiment(sentiment) {
+    const statuses = { verified: "已核对原帖", partial: "部分核对", unavailable: "未完成 X 检索" };
+    this.elements.detailXSearchStatus.textContent = statuses[sentiment.searchStatus] || statuses.unavailable;
+    this.elements.detailXSearchStatus.dataset.level = sentiment.searchStatus || "unavailable";
+    this.elements.detailXOverview.textContent = sentiment.overview || "没有找到可验证的 X 舆情";
+    this.renderXPosts(this.elements.detailPositive, sentiment.positive || [], "未找到带原帖链接的正面观点");
+    this.renderXPosts(this.elements.detailNegative, sentiment.negative || [], "未找到带原帖链接的负面观点");
+  }
+
+  renderXPosts(container, posts, emptyText) {
+    if (!posts.length) {
+      const empty = document.createElement("p");
+      empty.className = "x-empty";
+      empty.textContent = emptyText;
+      container.replaceChildren(empty);
+      return;
+    }
+    container.replaceChildren(...posts.map((post) => {
+      const row = document.createElement("article");
+      row.className = "x-post";
+      const author = document.createElement("strong");
+      author.textContent = [post.author, post.handle].filter(Boolean).join(" ");
+      const view = document.createElement("p");
+      view.textContent = post.view;
+      const quote = document.createElement("blockquote");
+      quote.textContent = post.quote ? `“${post.quote}”` : "未提供可核对短引";
+      row.append(author, view, quote, this.sourceLink(post.url, post.engagement ? `${post.engagement} · 原帖 ↗` : "查看原帖 ↗"));
+      return row;
+    }));
+  }
+
+  renderVerification(verification) {
+    this.renderTextList(this.elements.detailConfirmed, verification.confirmed || []);
+    this.renderTextList(this.elements.detailClaims, verification.projectClaims || []);
+    this.renderTextList(this.elements.detailUnknowns, verification.unknowns || []);
+  }
+
+  renderContinuation(continuation) {
+    this.renderTextList(this.elements.detailCatalysts, continuation.bullCase || []);
+    this.renderTextList(this.elements.detailInvalidations, continuation.bearCase || []);
+    this.renderTextList(this.elements.detailWatchItems, continuation.watchNext || []);
   }
 
   renderTextList(container, values) {
@@ -427,6 +469,21 @@ export class MonitorPanel {
       this.showToast("叙事分析已重新排队");
     } catch (error) {
       this.showToast(error.message || "重新分析失败", true);
+    }
+  }
+
+  async analyzeTopToken() {
+    this.elements.manualNarrativeButton.disabled = true;
+    try {
+      const event = await this.engine.analyzeTopToken();
+      this.settingsOpen = false;
+      this.elements.settingsPanel.classList.remove("show");
+      this.openNarrative(event);
+      this.showToast("已提交当前榜首分析");
+    } catch (error) {
+      this.showToast(error.message || "手动分析失败", true);
+    } finally {
+      this.elements.manualNarrativeButton.disabled = false;
     }
   }
 

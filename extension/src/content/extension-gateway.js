@@ -2,11 +2,19 @@ import { GROK, LIMITS, MESSAGE, MESSAGE_TARGET, STORAGE_KEYS } from "../shared/c
 
 export class ExtensionGateway {
   async request(type, payload = {}) {
-    const response = await chrome.runtime.sendMessage({
-      target: MESSAGE_TARGET.BACKGROUND,
-      type,
-      ...payload,
-    });
+    let response;
+    try {
+      response = await chrome.runtime.sendMessage({
+        target: MESSAGE_TARGET.BACKGROUND,
+        type,
+        ...payload,
+      });
+    } catch (error) {
+      const disconnected = /Receiving end does not exist|Extension context invalidated/i.test(error?.message || "");
+      throw new Error(disconnected
+        ? "插件刚刚更新，请刷新 GMGN 页面后重试"
+        : error?.message || "扩展后台未响应");
+    }
     if (!response?.ok) throw new Error(response?.error || "扩展后台未响应");
     return response.data;
   }
@@ -41,6 +49,10 @@ export class ExtensionGateway {
 
   retryNarrative(tokenId, detectedAt) {
     return this.request(MESSAGE.RETRY_NARRATIVE, { tokenId, detectedAt });
+  }
+
+  manualNarrative(token) {
+    return this.request(MESSAGE.MANUAL_NARRATIVE, { token });
   }
 
   onSettingsChanged(listener) {

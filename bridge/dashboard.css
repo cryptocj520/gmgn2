@@ -1,0 +1,29 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; color: #edf1eb; background: #101310; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; letter-spacing: 0; }
+main { width: min(680px, calc(100% - 32px)); margin: 48px auto; }
+header { display: flex; align-items: center; gap: 20px; padding-bottom: 22px; border-bottom: 1px solid #30352f; }
+header > div { flex: 1; }
+h1 { margin: 0; font-size: 22px; }
+header p { margin: 4px 0 0; color: #7f897c; }
+#status { padding: 5px 9px; border-radius: 4px; color: #a7afa3; background: #262b25; font-size: 11px; }
+#status.ready { color: #bdf27c; background: #23351c; }
+form { display: grid; gap: 18px; padding-top: 24px; }
+label > span { display: block; margin-bottom: 6px; color: #9da797; font-size: 12px; }
+input, select { width: 100%; height: 40px; padding: 0 11px; color: #eef2eb; background: #1b1f1b; border: 1px solid #3b4239; border-radius: 6px; font: inherit; letter-spacing: 0; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.number { display: grid; grid-template-columns: 1fr 28px; align-items: center; }
+.number i { color: #7f897c; font-style: normal; text-align: right; }
+.toggle { min-height: 50px; display: flex; align-items: center; gap: 16px; border-top: 1px solid #292e28; border-bottom: 1px solid #292e28; }
+.toggle > span { flex: 1; margin: 0; }
+.toggle b, .toggle small { display: block; }
+.toggle small { color: #727c6f; }
+.toggle input { width: 18px; height: 18px; }
+.notice { margin: -7px 0 0; color: #768073; font-size: 11px; }
+code { color: #b9c78d; }
+button { height: 42px; border: 0; border-radius: 6px; color: #14200c; background: #c9f26b; font: 750 14px/1 -apple-system, sans-serif; cursor: pointer; }
+.copy-row { display: grid; grid-template-columns: 1fr 72px; gap: 8px; }
+.copy-row button { height: 40px; }
+#message { min-height: 22px; margin: 0; color: #8f998c; text-align: center; }
+#message.error { color: #ff8e7c; }
+@media (max-width: 560px) { main { margin: 24px auto; } .row { grid-template-columns: 1fr; } }

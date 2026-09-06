@@ -1,6 +1,7 @@
 const DATABASE_NAME = "gmgn-monitor-secrets";
 const STORE_NAME = "secrets";
 const GROK_KEY_ID = "grokApiKey";
+const BRIDGE_TOKEN_ID = "bridgeToken";
 
 export class SecretVault {
   constructor(indexedDb = indexedDB) {
@@ -37,6 +38,22 @@ export class SecretVault {
 
   async isGrokConfigured() {
     return Boolean(await this.getGrokApiKey());
+  }
+
+  async saveBridgeToken(token) {
+    await this.put(BRIDGE_TOKEN_ID, String(token || "").trim());
+  }
+
+  getBridgeToken() {
+    return this.get(BRIDGE_TOKEN_ID);
+  }
+
+  clearBridgeToken() {
+    return this.remove(BRIDGE_TOKEN_ID);
+  }
+
+  async isBridgeConfigured() {
+    return Boolean(await this.getBridgeToken());
   }
 
   async get(key) {

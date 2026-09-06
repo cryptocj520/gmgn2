@@ -209,6 +209,23 @@ export class MonitorEngine {
     return this.gateway.retryNarrative(tokenId, detectedAt);
   }
 
+  async analyzeTopToken() {
+    const token = await this.getCurrentTopToken();
+    const result = await this.gateway.manualNarrative(token);
+    this.patchState({ events: result.summary.recentEvents });
+    return result.event;
+  }
+
+  async getCurrentTopToken() {
+    const tokens = await this.source.readTokens({ deep: false });
+    const token = tokens.reduce((top, item) => {
+      if (!top) return item;
+      return Number(item.rank) < Number(top.rank) ? item : top;
+    }, null);
+    if (!token) throw new Error("当前页面没有可分析的榜单代币");
+    return token;
+  }
+
   async clearData() {
     const summary = await this.gateway.clearData();
     this.needsBaseline = true;

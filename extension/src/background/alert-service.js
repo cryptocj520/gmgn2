@@ -1,6 +1,5 @@
 import { MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
-
-const OFFSCREEN_PATH = "src/offscreen/offscreen.html";
+import { ensureOffscreenDocument } from "./offscreen-manager.js";
 
 export class AlertService {
   async notify(report, settings, tabId) {
@@ -12,7 +11,7 @@ export class AlertService {
   }
 
   async playSound() {
-    await this.ensureOffscreenDocument();
+    await ensureOffscreenDocument();
     await chrome.runtime.sendMessage({
       target: MESSAGE_TARGET.OFFSCREEN,
       type: MESSAGE.PLAY_SOUND,
@@ -45,21 +44,4 @@ export class AlertService {
     await chrome.action.setBadgeText({ tabId, text: count ? String(count) : "" });
   }
 
-  async ensureOffscreenDocument() {
-    const url = chrome.runtime.getURL(OFFSCREEN_PATH);
-    const contexts = chrome.runtime.getContexts
-      ? await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT"], documentUrls: [url] })
-      : [];
-    if (contexts.length) return;
-
-    try {
-      await chrome.offscreen.createDocument({
-        url: OFFSCREEN_PATH,
-        reasons: ["AUDIO_PLAYBACK"],
-        justification: "播放用户启用的新代币提醒音",
-      });
-    } catch (error) {
-      if (!String(error?.message).includes("single offscreen")) throw error;
-    }
-  }
 }

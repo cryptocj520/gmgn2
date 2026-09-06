@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GMGN 本地分析服务</title>
+  <link rel="stylesheet" href="/dashboard.css">
+</head>
+<body>
+  <main>
+    <header><div><h1>GMGN 本地分析服务</h1><p>API 配置与分析逻辑独立运行在本机</p></div><span id="status">读取中</span></header>
+    <form id="configForm">
+      <label><span>插件配对令牌</span><div class="copy-row"><input id="pairingToken" type="password" readonly><button id="copyToken" type="button">复制</button></div></label>
+      <label><span>GROK_MODELS_BASE_URL</span><input id="grokBaseUrl" type="url" required autocomplete="off"></label>
+      <div class="row">
+        <label><span>模型名称</span><input id="grokModel" type="text" required autocomplete="off"></label>
+        <label><span>接口模式</span><select id="apiMode"><option value="responses">Responses</option><option value="chat_completions">Chat Completions</option></select></label>
+      </div>
+      <div class="row">
+        <label><span>搜索模式</span><select id="searchMode"><option value="native">中转原生搜索</option><option value="official_tools">xAI 官方工具</option><option value="disabled">不搜索</option></select></label>
+        <label><span>超时时间</span><div class="number"><input id="timeoutSeconds" type="number" min="15" max="180" step="5"><i>秒</i></div></label>
+      </div>
+      <label class="toggle"><span><b>X 即时搜索</b><small>由中转支持情况决定是否生效</small></span><input id="enableXSearch" type="checkbox"></label>
+      <label><span>XAI_API_KEY</span><input id="apiKey" type="password" placeholder="已保存时留空即可" autocomplete="off"></label>
+      <p class="notice">API Key 仅保存到本机 <code>bridge/.analysis-config.json</code>，不会进入插件、日志或 Git。</p>
+      <button type="submit">保存本地分析配置</button>
+      <p id="message" role="status"></p>
+    </form>
+  </main>
+  <script type="module" src="/dashboard.js"></script>
+</body>
+</html>
