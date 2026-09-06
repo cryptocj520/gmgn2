@@ -136,6 +136,14 @@ export class GmgnTrendAdapter {
     const volumeHeader = Object.keys(metrics).find((key) =>
       key.replace(/\s+/g, "").includes("成交额")
     ) || "";
+    const marketCap = findMetric(metrics, ["市值"], ["历史最高"]);
+    const price = findMetric(metrics, ["价格"], ["变化", "涨跌"]);
+    const priceChange = marketCap.match(/[+-]?\d+(?:\.\d+)?%/)?.[0] ||
+      normalizeText(row.textContent).match(/[+-]?\d+(?:\.\d+)?%/)?.[0] || "";
+    const socialLinks = Array.from(row.querySelectorAll('a[href^="http"]'))
+      .map((link) => link.href)
+      .filter((url, index, links) => links.indexOf(url) === index)
+      .slice(0, LIMITS.MAX_NARRATIVE_LINKS);
 
     return {
       ...parsed,
@@ -144,7 +152,10 @@ export class GmgnTrendAdapter {
       name,
       age: normalizeText(anchor.textContent).match(/\b\d+(?:s|m|h|d|mo|y)\b/i)?.[0] || "",
       image: imageNode?.currentSrc || imageNode?.src || "",
-      marketCap: findMetric(metrics, ["市值"], ["历史最高"]),
+      socialLinks,
+      price,
+      priceChange,
+      marketCap,
       athMarketCap: findMetric(metrics, ["历史最高", "市值"]),
       liquidity: findMetric(metrics, ["池子"]),
       volume: findMetric(metrics, ["成交额"]),

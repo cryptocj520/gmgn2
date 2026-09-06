@@ -5,6 +5,7 @@ export function createDataState() {
     schemaVersion: DATA_SCHEMA_VERSION,
     tokens: {},
     events: [],
+    narrativeJobs: {},
     updatedAt: 0,
   };
 }

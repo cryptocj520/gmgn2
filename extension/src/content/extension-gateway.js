@@ -1,4 +1,4 @@
-import { MESSAGE, MESSAGE_TARGET, STORAGE_KEYS } from "../shared/constants.js";
+import { GROK, LIMITS, MESSAGE, MESSAGE_TARGET, STORAGE_KEYS } from "../shared/constants.js";
 
 export class ExtensionGateway {
   async request(type, payload = {}) {
@@ -39,10 +39,40 @@ export class ExtensionGateway {
     return this.request(MESSAGE.UPDATE_BADGE, { count });
   }
 
+  retryNarrative(tokenId, detectedAt) {
+    return this.request(MESSAGE.RETRY_NARRATIVE, { tokenId, detectedAt });
+  }
+
   onSettingsChanged(listener) {
     const handler = (changes, areaName) => {
       const change = changes[STORAGE_KEYS.SETTINGS];
       if (areaName === "local" && change?.newValue) listener(change.newValue);
+    };
+    chrome.storage.onChanged.addListener(handler);
+    return () => chrome.storage.onChanged.removeListener(handler);
+  }
+
+  onDataChanged(listener) {
+    const handler = (changes, areaName) => {
+      const data = changes[STORAGE_KEYS.DATA]?.newValue;
+      if (areaName !== "local" || !data) return;
+      listener({
+        totalSeen: Object.keys(data.tokens || {}).length,
+        recentEvents: (data.events || []).slice(0, LIMITS.PANEL_EVENTS),
+        updatedAt: data.updatedAt || 0,
+      });
+    };
+    chrome.storage.onChanged.addListener(handler);
+    return () => chrome.storage.onChanged.removeListener(handler);
+  }
+
+  onIntegrationsChanged(listener) {
+    const handler = (changes, areaName) => {
+      if (areaName !== "local" || !changes[STORAGE_KEYS.INTEGRATIONS]) return;
+      listener(changes[STORAGE_KEYS.INTEGRATIONS].newValue || {
+        grokConfigured: false,
+        grokModel: GROK.MODEL,
+      });
     };
     chrome.storage.onChanged.addListener(handler);
     return () => chrome.storage.onChanged.removeListener(handler);

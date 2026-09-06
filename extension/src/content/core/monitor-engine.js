@@ -16,7 +16,8 @@ export class MonitorEngine {
     this.gateway = gateway;
     this.watchdog = watchdog;
     this.listeners = new Set();
-    this.cleanups = [];
+    this.lifetimeCleanups = [];
+    this.runtimeCleanups = [];
     this.scanTimer = 0;
     this.fullScanTimer = 0;
     this.debounceTimer = 0;
@@ -28,6 +29,7 @@ export class MonitorEngine {
       status: STATUS.IDLE,
       statusText: "正在准备",
       settings: null,
+      integrations: null,
       totalSeen: 0,
       currentCount: 0,
       sessionNew: 0,
@@ -43,11 +45,16 @@ export class MonitorEngine {
     this.needsBaseline = bootstrap.summary.requiresBaseline;
     this.patchState({
       settings: bootstrap.settings,
+      integrations: bootstrap.integrations,
       totalSeen: bootstrap.summary.totalSeen,
       events: bootstrap.summary.recentEvents,
       statusText: bootstrap.settings.autoStart ? "正在自动启动" : "待启动",
     });
-    this.cleanups.push(this.gateway.onSettingsChanged((settings) => this.applyExternalSettings(settings)));
+    this.lifetimeCleanups.push(this.gateway.onSettingsChanged((settings) => this.applyExternalSettings(settings)));
+    this.lifetimeCleanups.push(this.gateway.onDataChanged((summary) => this.applyExternalData(summary)));
+    this.lifetimeCleanups.push(this.gateway.onIntegrationsChanged((integration) => {
+      this.patchState({ integrations: integration });
+    }));
     if (bootstrap.settings.autoStart) await this.start();
   }
 
@@ -61,6 +68,7 @@ export class MonitorEngine {
     return {
       ...this.state,
       settings: this.state.settings ? { ...this.state.settings } : null,
+      integrations: this.state.integrations ? { ...this.state.integrations } : null,
       events: [...this.state.events],
       lastFresh: [...this.state.lastFresh],
     };
@@ -73,8 +81,8 @@ export class MonitorEngine {
       status: this.needsBaseline ? STATUS.BASELINING : STATUS.RUNNING,
       statusText: this.needsBaseline ? "正在建立完整基线" : "监控中",
     });
-    this.cleanups.push(this.source.observeChanges(() => this.scheduleScan()));
-    this.cleanups.push(this.source.observeVisibility(() => this.tryBackgroundFullScan()));
+    this.runtimeCleanups.push(this.source.observeChanges(() => this.scheduleScan()));
+    this.runtimeCleanups.push(this.source.observeVisibility(() => this.tryBackgroundFullScan()));
     this.restartInterval();
     this.restartFullScanInterval();
     await this.scan({ baseline: this.needsBaseline, completeSnapshot: true });
@@ -182,12 +190,23 @@ export class MonitorEngine {
     if (settings.autoStart && !this.state.running) this.start().catch((error) => this.fail(error));
   }
 
+  applyExternalData(summary) {
+    this.patchState({
+      totalSeen: summary.totalSeen,
+      events: summary.recentEvents,
+    });
+  }
+
   testSound() {
     return this.gateway.testSound();
   }
 
   getExportData() {
     return this.gateway.getExportData();
+  }
+
+  retryNarrative(tokenId, detectedAt) {
+    return this.gateway.retryNarrative(tokenId, detectedAt);
   }
 
   async clearData() {
@@ -230,7 +249,7 @@ export class MonitorEngine {
     clearInterval(this.scanTimer);
     clearInterval(this.fullScanTimer);
     clearTimeout(this.debounceTimer);
-    const runtimeCleanups = this.cleanups.splice(1);
+    const runtimeCleanups = this.runtimeCleanups.splice(0);
     runtimeCleanups.forEach((cleanup) => cleanup());
   }
 

@@ -94,19 +94,35 @@
       constructor() {
         this.settings = { ...DEFAULT_SETTINGS };
         this.data = createDataState();
-        this.listeners = new Set();
+        this.settingsListeners = new Set();
+        this.dataListeners = new Set();
+        this.integrationListeners = new Set();
       }
       async getBootstrap() {
-        return { settings: this.settings, summary: { totalSeen: 0, recentEvents: [], updatedAt: 0, requiresBaseline: true } };
+        return {
+          settings: this.settings,
+          summary: { totalSeen: 0, recentEvents: [], updatedAt: 0, requiresBaseline: true },
+          integrations: { grokConfigured: true, grokModel: "grok-4.6" },
+        };
       }
       async processScan(tokens, baseline, completeSnapshot) {
         const result = applyScanToState(this.data, tokens, { baseline, completeSnapshot, now: Date.now(), maxEvents: LIMITS.MAX_EVENTS, retentionDays: this.settings.retentionDays, alertTopN: this.settings.alertTopN });
         this.data = result.state;
+        if (result.report.alerts.length && this.settings.narrativeEnabled) {
+          const keys = new Set(result.report.alerts.map((token) => `${token.id}:${token.detectedAt}`));
+          this.data.events = this.data.events.map((event) => keys.has(`${event.id}:${event.detectedAt}`)
+            ? { ...event, narrative: { status: "queued", updatedAt: Date.now() } }
+            : event
+          );
+          result.report.recentEvents = this.data.events;
+          setTimeout(() => this.completeMockNarratives(keys), 900);
+        }
+        this.emitData();
         return result.report;
       }
       async updateSettings(patch) {
         this.settings = { ...this.settings, ...patch };
-        this.listeners.forEach((listener) => listener(this.settings));
+        this.settingsListeners.forEach((listener) => listener(this.settings));
         return this.settings;
       }
       async testSound() {
@@ -118,12 +134,70 @@
       }
       async clearData() {
         this.data = createDataState();
+        this.emitData();
         return { totalSeen: 0, recentEvents: [], updatedAt: 0 };
       }
       async updateBadge() {}
+      async retryNarrative(tokenId, detectedAt) {
+        const keys = new Set([`${tokenId}:${detectedAt}`]);
+        this.data.events = this.data.events.map((event) => keys.has(`${event.id}:${event.detectedAt}`)
+          ? { ...event, narrative: { status: "queued", updatedAt: Date.now() } }
+          : event
+        );
+        this.emitData();
+        setTimeout(() => this.completeMockNarratives(keys), 900);
+      }
       onSettingsChanged(listener) {
-        this.listeners.add(listener);
-        return () => this.listeners.delete(listener);
+        this.settingsListeners.add(listener);
+        return () => this.settingsListeners.delete(listener);
+      }
+      onDataChanged(listener) {
+        this.dataListeners.add(listener);
+        return () => this.dataListeners.delete(listener);
+      }
+      onIntegrationsChanged(listener) {
+        this.integrationListeners.add(listener);
+        return () => this.integrationListeners.delete(listener);
+      }
+      emitData() {
+        const summary = {
+          totalSeen: Object.keys(this.data.tokens).length,
+          recentEvents: this.data.events,
+          updatedAt: this.data.updatedAt,
+        };
+        this.dataListeners.forEach((listener) => listener(summary));
+      }
+      completeMockNarratives(keys) {
+        this.data.events = this.data.events.map((event) => keys.has(`${event.id}:${event.detectedAt}`)
+          ? { ...event, narrative: { status: "ready", analysis: this.mockAnalysis(event), updatedAt: Date.now() } }
+          : event
+        );
+        this.emitData();
+      }
+      mockAnalysis(event) {
+        return {
+          title: `${event.symbol} 正在借势社区文化与链上热度`,
+          summary: "该代币当前叙事主要由社区传播、短期成交额放大和社交平台讨论共同推动。公开信息仍较有限，热度与项目基本面之间尚未形成充分验证。",
+          narrative: "从当前公开信息看，代币名称和视觉表达采用容易传播的网络文化元素，并通过社区讨论形成短期注意力聚合。成交额排名快速上升说明资金与话题在同一时间集中，但这只能证明市场关注度，不能证明项目具有持续产品价值。后续应重点观察官方账号是否持续发布可核实进展、持有人结构是否改善，以及流动性在热度下降后能否保持。",
+          evidence: [
+            { point: "成交额进入当前时间段前排，市场注意力明显集中。", url: event.url },
+            { point: "代币名称与社交传播素材具有明显社区文化属性。", url: "https://x.com/" },
+            { point: "公开资料较少，暂未形成可验证的产品或协议叙事。", url: "" },
+          ],
+          risks: ["社区热度可能快速衰减", "公开资料不足，叙事真实性难以验证", "高成交额不等于可持续流动性"],
+          tags: ["社区文化", "热点轮动", "高成交额"],
+          confidence: "medium",
+          potential: {
+            outlook: "speculative",
+            rationale: "短期注意力和成交额具备延续可能，但目前缺少可验证产品进展，潜力主要依赖社区能否持续扩散。",
+            catalysts: ["官方账号持续发布可验证进展", "更多高质量社区参与者加入"],
+            invalidationSignals: ["成交额快速萎缩", "官方渠道长期停止更新"],
+            watchItems: ["持有人增长", "池子深度", "社交讨论持续性"],
+          },
+          sources: [event.url, "https://x.com/"],
+          model: "grok-4.6",
+          analyzedAt: Date.now(),
+        };
       }
     }
 

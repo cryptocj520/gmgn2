@@ -7,6 +7,10 @@ export const MESSAGE = Object.freeze({
   CLEAR_DATA: "CLEAR_DATA",
   UPDATE_BADGE: "UPDATE_BADGE",
   PLAY_SOUND: "PLAY_SOUND",
+  SAVE_GROK_API_KEY: "SAVE_GROK_API_KEY",
+  CLEAR_GROK_API_KEY: "CLEAR_GROK_API_KEY",
+  TEST_GROK_API: "TEST_GROK_API",
+  RETRY_NARRATIVE: "RETRY_NARRATIVE",
 });
 
 export const MESSAGE_TARGET = Object.freeze({
@@ -17,9 +21,10 @@ export const MESSAGE_TARGET = Object.freeze({
 export const STORAGE_KEYS = Object.freeze({
   DATA: "gmgnMonitorDataV2",
   SETTINGS: "gmgnMonitorSettingsV2",
+  INTEGRATIONS: "gmgnMonitorIntegrationsV1",
 });
 
-export const DATA_SCHEMA_VERSION = 4;
+export const DATA_SCHEMA_VERSION = 5;
 
 export const DEFAULT_SETTINGS = Object.freeze({
   autoStart: true,
@@ -30,6 +35,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   autoRefreshOnStall: true,
   connectionTimeoutSeconds: 30,
   alertTopN: 5,
+  narrativeEnabled: true,
+  grokBaseUrl: "https://api.x.ai/v1",
+  grokModel: "grok-4.6",
+  grokEnableXSearch: true,
 });
 
 export const LIMITS = Object.freeze({
@@ -42,6 +51,18 @@ export const LIMITS = Object.freeze({
   MAX_CONNECTION_TIMEOUT_SECONDS: 300,
   MIN_ALERT_TOP_N: 1,
   MAX_ALERT_TOP_N: 100,
+  MAX_NARRATIVE_LINKS: 8,
+});
+
+export const GROK = Object.freeze({
+  API_BASE_URL: "https://api.x.ai/v1",
+  MODEL: "grok-4.6",
+  REQUEST_TIMEOUT_MS: 45000,
+  VALIDATION_TIMEOUT_MS: 15000,
+  MAX_OUTPUT_TOKENS: 1800,
+  MAX_RETRIES: 1,
+  RETRY_DELAY_MS: 15000,
+  ALARM_PREFIX: "gmgn-narrative:",
 });
 
 export const WATCHDOG = Object.freeze({

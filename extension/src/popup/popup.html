@@ -18,16 +18,39 @@
     <div><strong id="updatedAt">--:--</strong><span>最近更新</span></div>
   </section>
 
-  <main>
-    <label class="setting"><span><b>打开页面自动监控</b><small>首次榜单静默建立基线</small></span><input id="autoStart" type="checkbox" role="switch"></label>
-    <label class="setting"><span><b>声音提醒</b><small>发现新代币时播放</small></span><input id="sound" type="checkbox" role="switch"></label>
-    <label class="setting"><span><b>桌面通知</b><small>同时显示系统通知</small></span><input id="desktopNotifications" type="checkbox" role="switch"></label>
-    <label class="setting"><span><b>连接超时自动刷新</b><small>读取 GMGN 底部连接状态</small></span><input id="autoRefreshOnStall" type="checkbox" role="switch"></label>
-    <label class="setting"><span><b>成交额提醒名次</b><small>仅首次发现且进入前 N 名</small></span><span class="number-wrap"><input id="alertTopN" type="number" min="1" max="100" step="1"><i>名</i></span></label>
-    <label class="setting"><span><b>扫描间隔</b><small>页面变化也会立即扫描</small></span><select id="intervalSeconds"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></label>
-    <label class="setting"><span><b>连接异常等待</b><small>持续异常后才刷新</small></span><span class="number-wrap"><input id="connectionTimeoutSeconds" type="number" min="10" max="300" step="5"><i>秒</i></span></label>
-    <label class="setting"><span><b>缺席记录保留</b><small>连续未出现后自动删除</small></span><span class="number-wrap"><input id="retentionDays" type="number" min="1" max="365" step="1"><i>天</i></span></label>
-  </main>
+  <nav class="tabs" aria-label="扩展设置">
+    <button class="tab active" type="button" role="tab" aria-selected="true" data-pane="monitorPane">监控设置</button>
+    <button class="tab" type="button" role="tab" aria-selected="false" data-pane="narrativePane">叙事分析</button>
+  </nav>
+
+  <div class="panes">
+    <main class="pane active" id="monitorPane">
+      <label class="setting"><span><b>打开页面自动监控</b><small>首次榜单静默建立基线</small></span><input id="autoStart" type="checkbox" role="switch"></label>
+      <label class="setting"><span><b>声音提醒</b><small>发现新代币时播放</small></span><input id="sound" type="checkbox" role="switch"></label>
+      <label class="setting"><span><b>桌面通知</b><small>同时显示系统通知</small></span><input id="desktopNotifications" type="checkbox" role="switch"></label>
+      <label class="setting"><span><b>连接超时自动刷新</b><small>读取 GMGN 底部连接状态</small></span><input id="autoRefreshOnStall" type="checkbox" role="switch"></label>
+      <label class="setting"><span><b>成交额提醒名次</b><small>仅首次发现且进入前 N 名</small></span><span class="number-wrap"><input id="alertTopN" type="number" min="1" max="100" step="1"><i>名</i></span></label>
+      <label class="setting"><span><b>扫描间隔</b><small>页面变化也会立即扫描</small></span><select id="intervalSeconds"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></label>
+      <label class="setting"><span><b>连接异常等待</b><small>持续异常后才刷新</small></span><span class="number-wrap"><input id="connectionTimeoutSeconds" type="number" min="10" max="300" step="5"><i>秒</i></span></label>
+      <label class="setting"><span><b>缺席记录保留</b><small>连续未出现后自动删除</small></span><span class="number-wrap"><input id="retentionDays" type="number" min="1" max="365" step="1"><i>天</i></span></label>
+    </main>
+
+    <section class="pane narrative-pane" id="narrativePane">
+      <div class="integration-head"><div><b>Grok API</b><small id="grokModel">grok-4.6</small></div><span class="api-status" id="grokStatus">未配置</span></div>
+      <label class="setting"><span><b>自动叙事分析</b><small>仅分析触发提醒的代币</small></span><input id="narrativeEnabled" type="checkbox" role="switch"></label>
+      <label class="setting"><span><b>X 即时搜索</b><small>获取最新帖子、账号和讨论</small></span><input id="grokEnableXSearch" type="checkbox" role="switch"></label>
+      <div class="config-fields">
+        <label><span>GROK_MODELS_BASE_URL</span><input id="grokBaseUrl" type="url" placeholder="https://example.com/v1" autocomplete="off" spellcheck="false"></label>
+        <label><span>模型名称</span><input id="grokModelInput" type="text" placeholder="grok-4.6" autocomplete="off" spellcheck="false"></label>
+      </div>
+      <div class="key-section">
+        <label for="grokApiKey">XAI_API_KEY</label>
+        <div class="key-row"><input id="grokApiKey" type="password" placeholder="xai-..." autocomplete="off" spellcheck="false"><button id="toggleKey" type="button" title="显示或隐藏 API Key">◉</button></div>
+        <p>密钥仅保存在扩展私有存储中，不会发送给 GMGN，也不会包含在数据导出中。触发提醒后，公开代币信息会发送给 xAI。</p>
+      </div>
+      <div class="key-actions"><button id="saveGrokKey" class="primary" type="button">保存并验证</button><button id="testGrokKey" class="secondary text" type="button">验证现有密钥</button><button id="clearGrokKey" class="danger" type="button">移除</button></div>
+    </section>
+  </div>
 
   <div class="actions">
     <button id="testSound" class="secondary" type="button" title="试听提醒音">♪</button>

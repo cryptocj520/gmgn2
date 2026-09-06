@@ -1,11 +1,17 @@
 import { DATA_SCHEMA_VERSION, DEFAULT_SETTINGS, LIMITS, STORAGE_KEYS } from "../shared/constants.js";
 import { applyScanToState, createDataState } from "../shared/scan-state.js";
+import { normalizeGrokBaseUrl, normalizeGrokModel } from "../shared/grok-config.js";
 
 export class DataRepository {
   constructor(storageArea = chrome.storage.local) {
     this.storage = storageArea;
     this.data = createDataState();
     this.settings = { ...DEFAULT_SETTINGS };
+    this.integrations = {
+      grokConfigured: false,
+      grokModel: DEFAULT_SETTINGS.grokModel,
+      grokBaseUrl: DEFAULT_SETTINGS.grokBaseUrl,
+    };
     this.requiresBaseline = true;
     this.ready = null;
     this.writeQueue = Promise.resolve();
@@ -17,13 +23,35 @@ export class DataRepository {
   }
 
   async load() {
-    const stored = await this.storage.get([STORAGE_KEYS.DATA, STORAGE_KEYS.SETTINGS]);
+    const stored = await this.storage.get([
+      STORAGE_KEYS.DATA,
+      STORAGE_KEYS.SETTINGS,
+      STORAGE_KEYS.INTEGRATIONS,
+    ]);
     const storedData = stored[STORAGE_KEYS.DATA];
     this.requiresBaseline = !storedData ||
       storedData.schemaVersion !== DATA_SCHEMA_VERSION ||
       Object.keys(storedData.tokens || {}).length === 0;
-    this.data = storedData || createDataState();
+    this.data = {
+      ...createDataState(),
+      ...(storedData || {}),
+      tokens: storedData?.tokens || {},
+      events: storedData?.events || [],
+      narrativeJobs: storedData?.narrativeJobs || {},
+    };
     this.settings = { ...DEFAULT_SETTINGS, ...(stored[STORAGE_KEYS.SETTINGS] || {}) };
+    try {
+      this.settings.grokBaseUrl = normalizeGrokBaseUrl(this.settings.grokBaseUrl);
+      this.settings.grokModel = normalizeGrokModel(this.settings.grokModel);
+    } catch (_) {
+      this.settings.grokBaseUrl = DEFAULT_SETTINGS.grokBaseUrl;
+      this.settings.grokModel = DEFAULT_SETTINGS.grokModel;
+    }
+    this.integrations = {
+      grokConfigured: Boolean(stored[STORAGE_KEYS.INTEGRATIONS]?.grokConfigured),
+      grokModel: this.settings.grokModel,
+      grokBaseUrl: this.settings.grokBaseUrl,
+    };
   }
 
   async getBootstrap() {
@@ -31,6 +59,7 @@ export class DataRepository {
     return {
       settings: { ...this.settings },
       summary: this.getSummary(),
+      integrations: this.getIntegrationStatus(),
     };
   }
 
@@ -84,8 +113,22 @@ export class DataRepository {
         Math.max(LIMITS.MIN_ALERT_TOP_N, Number.isFinite(rank) ? rank : DEFAULT_SETTINGS.alertTopN),
       );
     }
+    if (Object.hasOwn(allowed, "grokBaseUrl")) {
+      allowed.grokBaseUrl = normalizeGrokBaseUrl(allowed.grokBaseUrl);
+    }
+    if (Object.hasOwn(allowed, "grokModel")) {
+      allowed.grokModel = normalizeGrokModel(allowed.grokModel);
+    }
     this.settings = { ...this.settings, ...allowed };
-    await this.storage.set({ [STORAGE_KEYS.SETTINGS]: this.settings });
+    this.integrations = {
+      ...this.integrations,
+      grokModel: this.settings.grokModel,
+      grokBaseUrl: this.settings.grokBaseUrl,
+    };
+    await this.storage.set({
+      [STORAGE_KEYS.SETTINGS]: this.settings,
+      [STORAGE_KEYS.INTEGRATIONS]: this.integrations,
+    });
     return { ...this.settings };
   }
 
@@ -95,6 +138,158 @@ export class DataRepository {
     this.requiresBaseline = true;
     await this.storage.set({ [STORAGE_KEYS.DATA]: this.data });
     return this.getSummary();
+  }
+
+  async setGrokConfigured(configured) {
+    await this.initialize();
+    this.integrations = {
+      grokConfigured: Boolean(configured),
+      grokModel: this.settings.grokModel,
+      grokBaseUrl: this.settings.grokBaseUrl,
+    };
+    await this.storage.set({ [STORAGE_KEYS.INTEGRATIONS]: this.integrations });
+    return { ...this.integrations };
+  }
+
+  async queueNarratives(tokens) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const now = Date.now();
+      const jobs = { ...this.data.narrativeJobs };
+      const jobIds = [];
+      const jobByToken = new Map();
+
+      tokens.forEach((token, index) => {
+        const jobId = `${now}-${index}-${token.id}`;
+        jobs[jobId] = { jobId, token, attempts: 0, createdAt: now };
+        jobIds.push(jobId);
+        jobByToken.set(`${token.id}:${token.detectedAt}`, jobId);
+      });
+
+      const events = this.data.events.map((event) => {
+        const jobId = jobByToken.get(`${event.id}:${event.detectedAt}`);
+        return jobId
+          ? { ...event, narrative: { status: "queued", jobId, updatedAt: now } }
+          : event;
+      });
+      this.data = { ...this.data, events, narrativeJobs: jobs, updatedAt: now };
+      return { jobIds, summary: this.getSummary() };
+    });
+  }
+
+  async markNarrativesWaitingForKey(tokens) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const now = Date.now();
+      const targets = new Set(tokens.map((token) => `${token.id}:${token.detectedAt}`));
+      const events = this.data.events.map((event) => targets.has(`${event.id}:${event.detectedAt}`)
+        ? { ...event, narrative: { status: "waiting_key", updatedAt: now } }
+        : event
+      );
+      this.data = { ...this.data, events, updatedAt: now };
+      return this.getSummary();
+    });
+  }
+
+  async getNarrativeJob(jobId) {
+    await this.initialize();
+    return this.data.narrativeJobs[jobId] || null;
+  }
+
+  async getNarrativeJobs() {
+    await this.initialize();
+    return Object.values(this.data.narrativeJobs);
+  }
+
+  async getNarrativeEvent(tokenId, detectedAt) {
+    await this.initialize();
+    return this.data.events.find((event) => event.id === tokenId && event.detectedAt === detectedAt) || null;
+  }
+
+  async retryNarrativeJob(jobId, errorMessage) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const job = this.data.narrativeJobs[jobId];
+      if (!job) return null;
+      const updatedJob = { ...job, attempts: job.attempts + 1, lastError: errorMessage };
+      const narrativeJobs = { ...this.data.narrativeJobs, [jobId]: updatedJob };
+      const events = this.updateEventNarrative(job, {
+        status: "retrying",
+        jobId,
+        error: errorMessage,
+        updatedAt: Date.now(),
+      });
+      this.data = { ...this.data, events, narrativeJobs, updatedAt: Date.now() };
+      return updatedJob;
+    });
+  }
+
+  async completeNarrativeJob(jobId, analysis) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const job = this.data.narrativeJobs[jobId];
+      if (!job) return this.getSummary();
+      const narrative = { status: "ready", analysis, updatedAt: Date.now() };
+      const events = this.updateEventNarrative(job, narrative);
+      const tokens = this.data.tokens[job.token.id]
+        ? {
+            ...this.data.tokens,
+            [job.token.id]: { ...this.data.tokens[job.token.id], narrative },
+          }
+        : this.data.tokens;
+      const narrativeJobs = { ...this.data.narrativeJobs };
+      delete narrativeJobs[jobId];
+      this.data = { ...this.data, events, tokens, narrativeJobs, updatedAt: Date.now() };
+      return this.getSummary();
+    });
+  }
+
+  async failNarrativeJob(jobId, errorMessage) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const job = this.data.narrativeJobs[jobId];
+      if (!job) return this.getSummary();
+      const events = this.updateEventNarrative(job, {
+        status: "failed",
+        error: errorMessage,
+        updatedAt: Date.now(),
+      });
+      const narrativeJobs = { ...this.data.narrativeJobs };
+      delete narrativeJobs[jobId];
+      this.data = { ...this.data, events, narrativeJobs, updatedAt: Date.now() };
+      return this.getSummary();
+    });
+  }
+
+  async cancelNarrativeJobs(reason = "自动叙事分析已关闭") {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const pendingIds = new Set(Object.values(this.data.narrativeJobs).map((job) => job.token.id));
+      const events = this.data.events.map((event) => pendingIds.has(event.id)
+        ? { ...event, narrative: { status: "cancelled", error: reason, updatedAt: Date.now() } }
+        : event
+      );
+      this.data = { ...this.data, events, narrativeJobs: {}, updatedAt: Date.now() };
+      return this.getSummary();
+    });
+  }
+
+  updateEventNarrative(job, narrative) {
+    return this.data.events.map((event) =>
+      event.id === job.token.id && event.detectedAt === job.token.detectedAt
+        ? { ...event, narrative }
+        : event
+    );
+  }
+
+  runDataWrite(operation) {
+    const task = async () => {
+      const result = operation();
+      await this.storage.set({ [STORAGE_KEYS.DATA]: this.data });
+      return result;
+    };
+    this.writeQueue = this.writeQueue.then(task, task);
+    return this.writeQueue;
   }
 
   async getExportData() {
@@ -115,5 +310,9 @@ export class DataRepository {
       updatedAt: this.data.updatedAt,
       requiresBaseline: this.requiresBaseline,
     };
+  }
+
+  getIntegrationStatus() {
+    return { ...this.integrations };
   }
 }
