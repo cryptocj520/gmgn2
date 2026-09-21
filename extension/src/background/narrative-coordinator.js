@@ -126,8 +126,13 @@ export class NarrativeCoordinator {
   }
 
   async processJob(jobId) {
-    const job = await this.repository.getNarrativeJob(jobId);
-    if (!job) return;
+    const claim = await this.repository.claimNarrativeJob(jobId, GROK.PROCESSING_LEASE_MS);
+    if (!claim.job) return;
+    if (!claim.claimed) {
+      this.schedule(jobId, Math.max(1000, claim.retryAt - Date.now() + 100));
+      return;
+    }
+    const job = claim.job;
     const bridgeToken = await this.secretVault.getBridgeToken();
     if (!bridgeToken) {
       await this.repository.failNarrativeJob(jobId, "本地分析服务令牌已移除");

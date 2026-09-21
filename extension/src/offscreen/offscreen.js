@@ -63,7 +63,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       ok: false,
       error: error?.name === "AbortError"
         ? "本地桥接请求超时"
-        : error?.message || "隐藏文档处理失败",
+        : /failed to fetch|fetch failed|econnrefused/i.test(error?.message || "")
+          ? "无法连接本地分析服务，请确认 bridge/start.command 正在运行"
+          : error?.message || "隐藏文档处理失败",
     }));
   return true;
 });

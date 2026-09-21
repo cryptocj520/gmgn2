@@ -11,6 +11,7 @@ const projectDirectory = resolve(bridgeDirectory, "..");
 const tokenPath = resolve(bridgeDirectory, ".bridge-token");
 const logDirectory = resolve(projectDirectory, "logs");
 const logPath = resolve(logDirectory, "bridge.log");
+const usageLogPath = resolve(logDirectory, "bridge-usage.log");
 const host = process.env.GMGN_BRIDGE_HOST || "127.0.0.1";
 const port = Number.parseInt(process.env.GMGN_BRIDGE_PORT || "18761", 10);
 const maxBodyBytes = 1024 * 1024;
@@ -80,19 +81,22 @@ const server = createServer(async (request, response) => {
   if (request.method === "POST" && request.url === "/analyze") {
     if (!isAuthorized(request)) return writeJson(response, 401, { error: "桥接令牌无效" });
     const startedAt = Date.now();
+    let config = null;
     try {
       const payload = JSON.parse(await readRequestBody(request));
       if (!payload.token?.address || !payload.token?.chain) throw new AnalysisError("代币信息不完整", 400);
-      const config = await loadAnalysisConfig();
-      const analysis = await analyzeToken(payload.token, config);
+      config = await loadAnalysisConfig();
+      const result = await analyzeToken(payload.token, config);
+      await logUsage({ config, usage: result.usage, success: true });
       await log("INFO", "本地 AI 分析完成", {
         model: config.grokModel,
         apiMode: config.apiMode,
         durationMs: Date.now() - startedAt,
       });
-      return writeJson(response, 200, { analysis });
+      return writeJson(response, 200, { analysis: result.analysis });
     } catch (error) {
       const status = error instanceof AnalysisError ? error.status : 500;
+      await logUsage({ config, usage: error?.usage || null, success: false, errorType: `${status}:${error?.name || "Error"}` });
       await log("ERROR", "本地 AI 分析失败", {
         status,
         message: error?.message || "分析失败",
@@ -207,4 +211,21 @@ function writeJson(response, status, payload) {
 async function log(level, message, fields = {}) {
   const record = JSON.stringify({ time: new Date().toISOString(), level, message, ...fields });
   await appendFile(logPath, `${record}\n`, "utf8").catch(() => undefined);
+}
+
+async function logUsage({ config, usage, success, errorType = "" }) {
+  const record = {
+    time: new Date().toISOString(),
+    project: "gmgn2",
+    script: "bridge/server.mjs",
+    provider: config ? new URL(config.grokBaseUrl).origin : "unknown",
+    model: config?.grokModel || "unknown",
+    inputTokens: usage?.inputTokens ?? null,
+    outputTokens: usage?.outputTokens ?? null,
+    totalTokens: usage?.totalTokens ?? null,
+    success,
+    errorType,
+    usageStatus: usage ? "中转已返回 usage" : "中转未返回 usage，无法精确统计",
+  };
+  await appendFile(usageLogPath, `${JSON.stringify(record)}\n`, "utf8").catch(() => undefined);
 }

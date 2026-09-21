@@ -1,7 +1,10 @@
+const MAX_OUTPUT_TOKENS = 4000;
+
 export async function analyzeToken(token, config) {
   if (!config.apiKey) throw new AnalysisError("本地分析服务尚未配置 API Key", 409);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), config.timeoutSeconds * 1000);
+  let usage = null;
   try {
     const response = await fetch(endpoint(config), {
       method: "POST",
@@ -18,12 +21,21 @@ export async function analyzeToken(token, config) {
       throw new AnalysisError(
         body?.error?.message || body?.message || body?.error || `中转请求失败（HTTP ${response.status}）`,
         response.status,
+        normalizeUsage(body?.usage),
       );
     }
     const output = await extractUpstreamOutput(response, config.apiMode);
-    return normalizeAnalysis(parseAnalysis(output.text), output.sources, config.grokModel);
+    usage = output.usage;
+    const analysis = sanitizeTextUrls(validateAnalysis(parseAnalysis(output.text)));
+    return {
+      analysis: normalizeAnalysis(analysis, output.sources, config.grokModel),
+      usage,
+    };
   } catch (error) {
-    if (error instanceof AnalysisError) throw error;
+    if (error instanceof AnalysisError) {
+      error.usage ||= usage;
+      throw error;
+    }
     if (error?.name === "AbortError") throw new AnalysisError("中转分析请求超时", 504);
     throw new AnalysisError(error?.message || "本地分析请求失败", 502);
   } finally {
@@ -32,9 +44,10 @@ export async function analyzeToken(token, config) {
 }
 
 export class AnalysisError extends Error {
-  constructor(message, status = 500) {
+  constructor(message, status = 500, usage = null) {
     super(message);
     this.status = status;
+    this.usage = usage;
   }
 }
 
@@ -51,7 +64,7 @@ function payload(token, config) {
     return {
       model: config.grokModel,
       messages,
-      max_tokens: 1000,
+      max_tokens: MAX_OUTPUT_TOKENS,
       response_format: { type: "json_object" },
       ...(config.searchMode === "official_tools" ? { search_parameters: searchParameters(config) } : {}),
     };
@@ -61,7 +74,8 @@ function payload(token, config) {
     store: false,
     stream: true,
     input: messages,
-    max_output_tokens: 1000,
+    max_output_tokens: MAX_OUTPUT_TOKENS,
+    text: structuredTextFormat(),
     ...(config.searchMode === "official_tools" ? {
       tools: searchTools(config),
       max_tool_calls: 3,
@@ -83,7 +97,6 @@ async function readEventStream(response) {
   const decoder = new TextDecoder();
   let buffer = "";
   let text = "";
-  let completedOutput = null;
   const sources = [];
 
   while (true) {
@@ -96,7 +109,12 @@ async function readEventStream(response) {
         .filter((line) => line.startsWith("data:"))
         .map((line) => line.slice(5).trim())
         .join("\n");
-      if (!data || data === "[DONE]") continue;
+      if (!data) continue;
+      if (data === "[DONE]") {
+        if (!text) throw new AnalysisError("中转流式响应未返回分析文本", 502);
+        await reader.cancel().catch(() => undefined);
+        return { text, sources: [...new Set(sources)], usage: null };
+      }
       let event;
       try {
         event = JSON.parse(data);
@@ -105,25 +123,36 @@ async function readEventStream(response) {
       }
       if (event.type === "response.output_text.delta") text += String(event.delta || "");
       if (event.type === "response.completed" && event.response) {
-        completedOutput = extractResponses(event.response);
+        const completedOutput = extractResponses(event.response);
+        await reader.cancel().catch(() => undefined);
+        return {
+          text: completedOutput.text,
+          sources: [...new Set([...completedOutput.sources, ...sources])],
+          usage: completedOutput.usage,
+        };
       }
       if (event.type === "response.failed") {
-        throw new AnalysisError(event.response?.error?.message || event.error?.message || "中转流式分析失败", 502);
+        throw new AnalysisError(
+          event.response?.error?.message || event.error?.message || "中转流式分析失败",
+          502,
+          normalizeUsage(event.response?.usage || event.usage),
+        );
       }
+      if (event.type === "response.incomplete") throw incompleteAnalysisError(event.response);
       const url = event.annotation?.url || event.url;
       if (/^https?:\/\//i.test(String(url || ""))) sources.push(url);
     }
     if (done) break;
   }
 
-  if (completedOutput?.text) return completedOutput;
   if (!text) throw new AnalysisError("中转流式响应未返回分析文本", 502);
-  return { text, sources: [...new Set(sources)] };
+  return { text, sources: [...new Set(sources)], usage: null };
 }
 
 function systemPrompt() {
   return [
     "你是加密文化、Meme 与社区叙事研究员，只分析公开资料，不提供买卖建议。",
+    "所有面向用户的分析、摘要、判断和标签必须使用简体中文；代币名称、人物名称、账号、URL 和原帖短引保留原文。",
     "首要任务是讲清代币背后的故事：名字从哪里来、关联人物或事件、社区为何传播、为什么此刻走热。",
     "X 舆情必须来自实际检索到的帖子。每条观点都要给作者、账号、观点、短引和原帖 URL；没有 URL 就不能算 X 评价。",
     "禁止根据价格涨跌臆测社区情绪，禁止把风险推断写成已经存在的骗局投诉或负面舆情。",
@@ -163,12 +192,111 @@ function userPrompt(token) {
     "返回 JSON：",
     "story={headline,one_line,origin,key_people_or_event,why_now,timeline:[{time,event,url}]}；",
     "x_sentiment={search_status:verified|partial|unavailable,searched_at,overview,positive:[{author,handle,view,quote,url,engagement}],negative:[同结构]}；",
-    "verification={confirmed,project_claims,unknowns}，每项为简短字符串数组；",
-    "continuation={bull_case,bear_case,watch_next}，每项最多3条；",
-    "market_context=最多120字；risks=最多4条；tags=2-5项；confidence=high|medium|low；sources=URL数组。",
+    "story.timeline 最多2条；x_sentiment 的 positive 和 negative 各最多1条；",
+    "verification={confirmed,project_claims,unknowns}，每项最多2条；",
+    "continuation={bull_case,bear_case,watch_next}，每项最多2条；",
+    "market_context=最多120字；risks=最多3条；tags=2-4项；confidence=high|medium|low；sources=最多4个URL。",
     "X 正负面条目没有原帖 URL 时必须删除。区分事实、项目方自述和社区猜测，不给价格目标。",
     JSON.stringify(publicToken),
   ].join("\n");
+}
+
+function structuredTextFormat() {
+  const text = (maxLength) => ({ type: "string", maxLength });
+  const list = (maxItems, maxLength) => ({
+    type: "array",
+    maxItems,
+    items: text(maxLength),
+  });
+  const xPost = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      author: text(50),
+      handle: text(50),
+      view: text(120),
+      quote: text(100),
+      url: text(240),
+      engagement: text(60),
+    },
+    required: ["author", "handle", "view", "quote", "url", "engagement"],
+  };
+  return {
+    format: {
+      type: "json_schema",
+      name: "gmgn_narrative_analysis",
+      strict: true,
+      schema: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          story: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              headline: text(60),
+              one_line: text(120),
+              origin: text(280),
+              key_people_or_event: text(140),
+              why_now: text(140),
+              timeline: {
+                type: "array",
+                maxItems: 2,
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: { time: text(40), event: text(120), url: text(240) },
+                  required: ["time", "event", "url"],
+                },
+              },
+            },
+            required: ["headline", "one_line", "origin", "key_people_or_event", "why_now", "timeline"],
+          },
+          x_sentiment: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              search_status: { type: "string", enum: ["verified", "partial", "unavailable"] },
+              searched_at: text(32),
+              overview: text(200),
+              positive: { type: "array", maxItems: 1, items: xPost },
+              negative: { type: "array", maxItems: 1, items: xPost },
+            },
+            required: ["search_status", "searched_at", "overview", "positive", "negative"],
+          },
+          verification: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              confirmed: list(2, 100),
+              project_claims: list(2, 100),
+              unknowns: list(2, 100),
+            },
+            required: ["confirmed", "project_claims", "unknowns"],
+          },
+          continuation: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              bull_case: list(2, 100),
+              bear_case: list(2, 100),
+              watch_next: list(2, 100),
+            },
+            required: ["bull_case", "bear_case", "watch_next"],
+          },
+          market_context: text(120),
+          risks: list(3, 100),
+          tags: list(4, 24),
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          sources: { type: "array", maxItems: 4, items: text(240) },
+        },
+        required: [
+          "story", "x_sentiment", "verification", "continuation",
+          "market_context", "risks", "tags", "confidence", "sources",
+        ],
+      },
+    },
+  };
 }
 
 function searchTools(config) {
@@ -184,19 +312,21 @@ function searchParameters(config) {
 }
 
 function extractResponses(body) {
-  if (body.output_text) return { text: body.output_text, sources: [] };
+  if (body?.status === "incomplete") throw incompleteAnalysisError(body);
+  const usage = normalizeUsage(body?.usage);
+  if (body.output_text) return { text: body.output_text, sources: [], usage };
   const content = (body.output || []).filter((item) => item.type === "message").flatMap((item) => item.content || []);
   const texts = content.filter((item) => ["output_text", "text"].includes(item.type) && item.text).map((item) => item.text);
   if (!texts.length) throw new AnalysisError("中转未返回分析文本", 502);
   const sources = content.flatMap((item) => item.annotations || []).map((item) => item.url).filter(Boolean);
-  return { text: texts.at(-1), sources };
+  return { text: texts.at(-1), sources, usage };
 }
 
 function extractChat(body) {
   const content = body.choices?.[0]?.message?.content;
   const text = Array.isArray(content) ? content.map((item) => item.text || "").join("") : content;
   if (!text) throw new AnalysisError("中转未返回分析文本", 502);
-  return { text, sources: body.citations || [] };
+  return { text, sources: body.citations || [], usage: normalizeUsage(body?.usage) };
 }
 
 function parseAnalysis(text) {
@@ -214,16 +344,79 @@ function parseAnalysis(text) {
       }
     }
   }
-  if (!cleaned) throw new AnalysisError("中转未返回可用分析文本", 502);
-  const firstLine = cleaned.split(/\r?\n/).find(Boolean) || "AI 叙事分析";
-  return {
-    title: firstLine.replace(/^#{1,6}\s*/, "").slice(0, 80),
-    summary: cleaned.replace(/\s+/g, " ").slice(0, 300),
-    narrative: cleaned,
-    confidence: "low",
-    sentiment: { negative_summary: "中转返回非结构化文本，请结合正文判断。", severity: "medium" },
-    potential: { outlook: "unknown", rationale: "中转未返回结构化潜力字段，请以正文为准。" },
-  };
+  throw new AnalysisError(
+    cleaned ? "中转返回的分析 JSON 不完整或格式错误" : "中转未返回可用分析文本",
+    502,
+  );
+}
+
+function validateAnalysis(value) {
+  const violation = schemaViolation(value, structuredTextFormat().format.schema);
+  if (violation) throw new AnalysisError(`中转返回的分析结果不符合格式：${violation}`, 502);
+  return value;
+}
+
+function schemaViolation(value, schema, path = "result") {
+  if (schema.enum && !schema.enum.includes(value)) return `${path} 不在允许值中`;
+  if (schema.type === "string") {
+    if (typeof value !== "string") return `${path} 必须是文本`;
+    if (schema.maxLength && value.length > schema.maxLength) return `${path} 超过长度限制`;
+    return "";
+  }
+  if (schema.type === "array") {
+    if (!Array.isArray(value)) return `${path} 必须是数组`;
+    if (schema.maxItems && value.length > schema.maxItems) return `${path} 超过数量限制`;
+    for (let index = 0; index < value.length; index += 1) {
+      const violation = schemaViolation(value[index], schema.items, `${path}[${index}]`);
+      if (violation) return violation;
+    }
+    return "";
+  }
+  if (schema.type === "object") {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return `${path} 必须是对象`;
+    const missing = (schema.required || []).find((key) => !Object.hasOwn(value, key));
+    if (missing) return `${path}.${missing} 缺失`;
+    if (schema.additionalProperties === false) {
+      const extra = Object.keys(value).find((key) => !Object.hasOwn(schema.properties || {}, key));
+      if (extra) return `${path}.${extra} 不允许出现`;
+    }
+    for (const [key, childSchema] of Object.entries(schema.properties || {})) {
+      if (!Object.hasOwn(value, key)) continue;
+      const violation = schemaViolation(value[key], childSchema, `${path}.${key}`);
+      if (violation) return violation;
+    }
+  }
+  return "";
+}
+
+function sanitizeTextUrls(value) {
+  if (typeof value === "string") {
+    return value.replace(/https?:\/\/[^\s<>"']+/gi, (match) => safeUrl(match));
+  }
+  if (Array.isArray(value)) return value.map(sanitizeTextUrls);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeTextUrls(item)]));
+  }
+  return value;
+}
+
+function incompleteAnalysisError(response = {}) {
+  const reason = response?.incomplete_details?.reason;
+  return new AnalysisError(
+    reason === "max_output_tokens"
+      ? "分析输出过长，结果被截断，请缩短分析内容后重试"
+      : "中转返回的分析结果不完整，请稍后重试",
+    502,
+    normalizeUsage(response?.usage),
+  );
+}
+
+function normalizeUsage(value = {}) {
+  const raw = [value?.input_tokens, value?.output_tokens, value?.total_tokens];
+  if (raw.some((item) => item === null || item === undefined || item === "")) return null;
+  const [inputTokens, outputTokens, totalTokens] = raw.map(Number);
+  if (![inputTokens, outputTokens, totalTokens].every((item) => Number.isInteger(item) && item >= 0)) return null;
+  return { inputTokens, outputTokens, totalTokens };
 }
 
 function normalizeAnalysis(value, annotationSources, model) {
@@ -244,7 +437,7 @@ function normalizeAnalysis(value, annotationSources, model) {
     ...xSentiment.positive.map((item) => item.url),
     ...xSentiment.negative.map((item) => item.url),
     ...story.timeline.map((item) => item.url),
-  ].map(String).filter((url) => safeUrl(url)))].slice(0, 8);
+  ].map(safeUrl).filter(Boolean))].slice(0, 8);
   return {
     title: story.headline,
     summary: story.oneLine,
@@ -369,6 +562,18 @@ function stringArray(value, limit) {
 }
 
 function safeUrl(value) {
-  const url = String(value || "");
-  return /^https?:\/\//i.test(url) ? url : "";
+  try {
+    const url = new URL(String(value || ""));
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    const sensitiveKey = /(?:^|[-_])(?:(?:x[-_])?api[-_]?key|key|token|access[-_]?token|secret|signature|sig|auth|authorization|credential|password|passwd)(?:$|[-_])/i;
+    [...url.searchParams.keys()].forEach((key) => {
+      if (sensitiveKey.test(key)) url.searchParams.delete(key);
+    });
+    url.username = "";
+    url.password = "";
+    url.hash = "";
+    return url.toString();
+  } catch (_) {
+    return "";
+  }
 }

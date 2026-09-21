@@ -181,12 +181,24 @@ export class DataRepository {
       const jobs = { ...this.data.narrativeJobs };
       const jobIds = [];
       const jobByToken = new Map();
+      const existingJobByToken = new Map(Object.values(jobs).map((job) => [
+        `${job.token.id}:${job.token.detectedAt}`,
+        job.jobId,
+      ]));
 
       tokens.forEach((token, index) => {
+        const tokenKey = `${token.id}:${token.detectedAt}`;
+        const existingJobId = existingJobByToken.get(tokenKey);
+        if (existingJobId) {
+          jobIds.push(existingJobId);
+          jobByToken.set(tokenKey, existingJobId);
+          return;
+        }
         const jobId = `${now}-${index}-${token.id}`;
-        jobs[jobId] = { jobId, token, attempts: 0, createdAt: now };
+        jobs[jobId] = { jobId, token, attempts: 0, status: "queued", leaseUntil: 0, createdAt: now };
         jobIds.push(jobId);
-        jobByToken.set(`${token.id}:${token.detectedAt}`, jobId);
+        jobByToken.set(tokenKey, jobId);
+        existingJobByToken.set(tokenKey, jobId);
       });
 
       const events = this.data.events.map((event) => {
@@ -243,6 +255,31 @@ export class DataRepository {
     return this.data.events.filter((event) => event.narrative?.status === "waiting_key");
   }
 
+  async claimNarrativeJob(jobId, leaseMs, now = Date.now()) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const job = this.data.narrativeJobs[jobId];
+      if (!job) return { claimed: false, job: null, retryAt: 0 };
+      const active = Object.values(this.data.narrativeJobs).find((candidate) =>
+        candidate.status === "processing" && Number(candidate.leaseUntil) > now
+      );
+      if (active) return { claimed: false, job, retryAt: Number(active.leaseUntil) };
+
+      const updatedJob = {
+        ...job,
+        status: "processing",
+        leaseUntil: now + leaseMs,
+        startedAt: now,
+      };
+      this.data = {
+        ...this.data,
+        narrativeJobs: { ...this.data.narrativeJobs, [jobId]: updatedJob },
+        updatedAt: now,
+      };
+      return { claimed: true, job: updatedJob, retryAt: 0 };
+    });
+  }
+
   async getNarrativeEvent(tokenId, detectedAt) {
     await this.initialize();
     return this.data.events.find((event) => event.id === tokenId && event.detectedAt === detectedAt) || null;
@@ -253,7 +290,13 @@ export class DataRepository {
     return this.runDataWrite(() => {
       const job = this.data.narrativeJobs[jobId];
       if (!job) return null;
-      const updatedJob = { ...job, attempts: job.attempts + 1, lastError: errorMessage };
+      const updatedJob = {
+        ...job,
+        attempts: job.attempts + 1,
+        status: "queued",
+        leaseUntil: 0,
+        lastError: errorMessage,
+      };
       const narrativeJobs = { ...this.data.narrativeJobs, [jobId]: updatedJob };
       const events = this.updateEventNarrative(job, {
         status: "retrying",

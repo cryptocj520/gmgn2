@@ -464,11 +464,14 @@ export class MonitorPanel {
 
   async retrySelectedNarrative() {
     if (!this.selectedEvent) return;
+    this.elements.retryNarrative.disabled = true;
     try {
       await this.engine.retryNarrative(this.selectedEvent.id, this.selectedEvent.detectedAt);
       this.showToast("叙事分析已重新排队");
     } catch (error) {
       this.showToast(error.message || "重新分析失败", true);
+    } finally {
+      this.elements.retryNarrative.disabled = false;
     }
   }
 
