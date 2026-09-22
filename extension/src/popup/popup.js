@@ -1,6 +1,6 @@
 import { GMGN_URL, MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
 import { normalizeBridgeBaseUrl, permissionPatternForBridgeUrl } from "../shared/grok-config.js";
-import { formatClock } from "../shared/token.js";
+import { formatClock, parseTokenHref, shortAddress } from "../shared/token.js";
 
 const settingIds = [
   "autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "alertTopN",
@@ -9,7 +9,8 @@ const settingIds = [
 const elements = Object.fromEntries([
   ...settingIds, "seenCount", "eventCount", "updatedAt", "testSound", "openGmgn", "message",
   "analyzerStatus", "bridgeBaseUrl", "bridgeToken", "bridgeStatus", "toggleBridgeToken",
-  "saveAnalyzer", "testAnalyzer", "openAnalyzerSettings", "migrateLegacyConfig", "manualTopNarrative",
+  "saveAnalyzer", "testAnalyzer", "openAnalyzerSettings", "migrateLegacyConfig",
+  "manualTopNarrative", "manualCaAddress", "manualCaNarrative",
 ].map((id) => [id, document.getElementById(id)]));
 let currentSettings = null;
 let currentIntegration = null;
@@ -160,32 +161,101 @@ elements.migrateLegacyConfig.addEventListener("click", async () => {
   }
 });
 
+function setNarrativeActionsDisabled(disabled) {
+  elements.manualTopNarrative.disabled = disabled;
+  elements.manualCaNarrative.disabled = disabled;
+  elements.manualCaAddress.disabled = disabled;
+}
+
+function parseManualContractAddress(raw) {
+  const address = String(raw || "").trim();
+  if (!address) throw new Error("请输入合约地址");
+  if (/\s/.test(address)) throw new Error("合约地址不能包含空格");
+  if (address.length < 20 || address.length > 128) throw new Error("合约地址格式不正确");
+  if (/^0x/i.test(address)) {
+    if (!/^0x[a-fA-F0-9]{40,80}$/.test(address)) throw new Error("合约地址格式不正确");
+    return `0x${address.slice(2)}`;
+  }
+  // 兼容 Solana/Base58，并允许其他 GMGN 链常见字符，只拦明显非法输入
+  if (!/^[A-Za-z0-9_.:-]+$/.test(address)) throw new Error("合约地址格式不正确");
+  if (/^[0-9_.:-]+$/.test(address)) throw new Error("合约地址格式不正确");
+  return address;
+}
+
+function buildMinimalCaToken(chain, address) {
+  const parsed = parseTokenHref(`https://gmgn.ai/${encodeURIComponent(String(chain || "").trim())}/token/${encodeURIComponent(address)}`);
+  if (!parsed?.chain || !parsed?.address || !parsed?.id) throw new Error("无法读取当前页面的链信息");
+  const label = shortAddress(parsed.address) || parsed.address;
+  return {
+    chain: parsed.chain,
+    address: parsed.address,
+    id: parsed.id,
+    url: parsed.url,
+    symbol: label,
+    name: label,
+  };
+}
+
+async function readCurrentPageTopToken() {
+  const tabs = await chrome.tabs.query({ url: "https://gmgn.ai/trend*" });
+  const tab = tabs.find((item) => item.active) || tabs[0];
+  if (!tab?.id) throw new Error("请先打开 GMGN 热门榜页面");
+  let topTokenResponse;
+  try {
+    topTokenResponse = await chrome.tabs.sendMessage(tab.id, {
+      target: MESSAGE_TARGET.CONTENT,
+      type: MESSAGE.GET_CURRENT_TOP_TOKEN,
+    });
+  } catch (error) {
+    const disconnected = /Receiving end does not exist|Extension context invalidated/i.test(error?.message || "");
+    throw new Error(disconnected ? "GMGN 页面仍在使用旧插件，请刷新该页面后重试" : error.message);
+  }
+  if (!topTokenResponse?.ok) throw new Error(topTokenResponse?.error || "无法读取当前榜首");
+  return topTokenResponse.token;
+}
+
 elements.manualTopNarrative.addEventListener("click", async () => {
-  elements.manualTopNarrative.disabled = true;
+  setNarrativeActionsDisabled(true);
   showMessage("正在读取 GMGN 当前榜首…");
   try {
     await requestLocalNetworkAccess(currentSettings.bridgeBaseUrl);
-    const tabs = await chrome.tabs.query({ url: "https://gmgn.ai/trend*" });
-    const tab = tabs.find((item) => item.active) || tabs[0];
-    if (!tab?.id) throw new Error("请先打开 GMGN 热门榜页面");
-    let topTokenResponse;
-    try {
-      topTokenResponse = await chrome.tabs.sendMessage(tab.id, {
-        target: MESSAGE_TARGET.CONTENT,
-        type: MESSAGE.GET_CURRENT_TOP_TOKEN,
-      });
-    } catch (error) {
-      const disconnected = /Receiving end does not exist|Extension context invalidated/i.test(error?.message || "");
-      throw new Error(disconnected ? "GMGN 页面仍在使用旧插件，请刷新该页面后重试" : error.message);
-    }
-    if (!topTokenResponse?.ok) throw new Error(topTokenResponse?.error || "无法读取当前榜首");
-    await request(MESSAGE.MANUAL_NARRATIVE, { token: topTokenResponse.token });
-    showMessage(`已发送 ${topTokenResponse.token.symbol || "榜首代币"}，结果将在 GMGN 面板显示`);
+    const token = await readCurrentPageTopToken();
+    await request(MESSAGE.MANUAL_NARRATIVE, { token });
+    showMessage(`已发送 ${token.symbol || "榜首代币"}，结果将在 GMGN 面板显示`);
   } catch (error) {
     showMessage(error.message || "手动分析失败", true);
   } finally {
-    elements.manualTopNarrative.disabled = false;
+    setNarrativeActionsDisabled(false);
   }
+});
+
+elements.manualCaNarrative.addEventListener("click", async () => {
+  let address;
+  try {
+    address = parseManualContractAddress(elements.manualCaAddress.value);
+  } catch (error) {
+    showMessage(error.message, true);
+    return;
+  }
+  setNarrativeActionsDisabled(true);
+  showMessage("正在读取当前页面链信息…");
+  try {
+    await requestLocalNetworkAccess(currentSettings.bridgeBaseUrl);
+    const pageToken = await readCurrentPageTopToken();
+    const token = buildMinimalCaToken(pageToken?.chain, address);
+    await request(MESSAGE.MANUAL_NARRATIVE, { token });
+    showMessage(`已发送 ${token.symbol || "该合约"}，结果将在 GMGN 面板显示`);
+  } catch (error) {
+    showMessage(error.message || "手动分析失败", true);
+  } finally {
+    setNarrativeActionsDisabled(false);
+  }
+});
+
+elements.manualCaAddress.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  elements.manualCaNarrative.click();
 });
 
 elements.testSound.addEventListener("click", async () => {

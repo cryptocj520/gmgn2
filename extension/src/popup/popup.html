@@ -48,6 +48,11 @@
       <button id="openAnalyzerSettings" class="secondary wide" type="button">打开本地 AI 设置</button>
       <button id="migrateLegacyConfig" class="migration-action" type="button">迁移插件中的旧 API 配置</button>
       <button id="manualTopNarrative" class="manual-action" type="button">手动分析当前榜首</button>
+      <div class="ca-action">
+        <label for="manualCaAddress">分析指定 CA</label>
+        <input id="manualCaAddress" type="text" placeholder="合约地址，沿用当前热门榜页面的链" autocomplete="off" spellcheck="false">
+        <button id="manualCaNarrative" class="manual-action" type="button">分析该 CA</button>
+      </div>
     </section>
   </div>
 

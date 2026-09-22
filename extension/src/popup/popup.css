@@ -77,6 +77,11 @@ button { height: 36px; border: 0; border-radius: 6px; cursor: pointer; }
 .key-actions { display: grid; grid-template-columns: 1fr 1fr 56px; gap: 7px; margin-top: 8px; }
 .manual-action { width: 100%; margin-top: 9px; color: #d9f99d; background: #1b2118; border: 1px solid #52613e; }
 .manual-action:disabled { opacity: .5; cursor: wait; }
+.ca-action { display: grid; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #292e28; }
+.ca-action label { color: #dce1da; font-size: 11px; }
+.ca-action input { width: 100%; height: 34px; padding: 0 9px; color: #eef2eb; background: #1b1f1b; border: 1px solid #3b4239; border-radius: 6px; }
+.ca-action .manual-action { margin-top: 0; }
+.ca-action input:disabled { opacity: .5; cursor: wait; }
 .local-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 12px; }
 .wide { width: 100%; margin-top: 8px; font-size: 11px; }
 .migration-action { width: 100%; margin-top: 8px; color: #e8c77a; background: #282315; border: 1px solid #5a4d2b; font-size: 11px; }
