@@ -54,6 +54,20 @@ export function formatClock(value) {
   }).format(new Date(value));
 }
 
+export function formatMonthDayClock(value) {
+  if (!value) return "-- --:--:--";
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date(value));
+  const values = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
+  return `${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
+
 export function shortAddress(address) {
   if (!address || address.length < 12) return address || "";
   return `${address.slice(0, 5)}…${address.slice(-4)}`;

@@ -1,5 +1,5 @@
 import { LIMITS } from "../../shared/constants.js";
-import { formatClock, shortAddress } from "../../shared/token.js";
+import { formatClock, formatMonthDayClock, shortAddress } from "../../shared/token.js";
 import { PANEL_STYLES } from "./panel-styles.js";
 
 export class MonitorPanel {
@@ -51,7 +51,7 @@ export class MonitorPanel {
           <div class="stat"><span class="stat-value" id="scanValue">--:--</span><span class="stat-label">最近扫描</span></div>
         </div>
         <div class="content"><div class="section-head"><span class="section-title">提醒记录</span><span class="section-count" id="eventCount">0 条</span></div><div class="events" id="events"></div></div>
-        <footer class="footer"><span class="footer-state"></span><span>全局合约去重 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.13.1</span></footer>
+        <footer class="footer"><span class="footer-state"></span><span>全局合约去重 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.13.2</span></footer>
         <aside class="settings" id="settingsPanel">
           <h2 class="settings-title">监控设置</h2>
           ${this.toggleSetting("autoStartToggle", "打开页面自动监控", "首次榜单仍会静默建立基线")}
@@ -275,7 +275,7 @@ export class MonitorPanel {
     marketCap.textContent = event.marketCap || "--";
     const time = document.createElement("span");
     time.className = "event-time";
-    time.textContent = formatClock(event.detectedAt || event.firstSeen);
+    time.textContent = formatMonthDayClock(event.detectedAt || event.firstSeen);
     side.append(marketCap, time);
     row.append(image, main, side);
     return row;

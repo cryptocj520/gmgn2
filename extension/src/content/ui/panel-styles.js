@@ -109,7 +109,7 @@ export const PANEL_STYLES = `
   .event-meta.narrative-failed, .event-meta.narrative-waiting_key, .event-meta.narrative-cancelled { color: #d38b7f; }
   .event-side { text-align: right; }
   .market-cap { display: block; color: #eabf65; font-size: 12px; font-weight: 650; }
-  .event-time { display: block; margin-top: 4px; color: #737c70; font-size: 10px; }
+  .event-time { display: block; margin-top: 4px; color: #737c70; font-size: 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .settings {
     display: none; position: absolute; inset: 52px 0 0; z-index: 3;
     background: #111411; padding: 14px; overflow: auto;
