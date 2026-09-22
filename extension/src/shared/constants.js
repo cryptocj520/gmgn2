@@ -47,6 +47,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   grokEnableXSearch: true,
   bridgeFallbackEnabled: true,
   bridgeBaseUrl: "http://127.0.0.1:18761",
+  panelSize: "small",
+  panelPosition: null,
 });
 
 export const LIMITS = Object.freeze({

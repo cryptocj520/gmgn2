@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GMGN 热门币监控",
-  "version": "0.13.2",
+  "version": "0.13.3",
   "description": "监控 GMGN 热门榜，发现前排新代币时提醒并使用 Grok 分析叙事。",
   "permissions": [
     "storage",

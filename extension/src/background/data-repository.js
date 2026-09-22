@@ -6,6 +6,7 @@ import {
   normalizeGrokBaseUrl,
   normalizeGrokModel,
 } from "../shared/grok-config.js";
+import { normalizePanelPosition, normalizePanelSize } from "../shared/panel-preferences.js";
 
 export class DataRepository {
   constructor(storageArea = chrome.storage.local) {
@@ -58,6 +59,8 @@ export class DataRepository {
       this.settings.grokApiMode = DEFAULT_SETTINGS.grokApiMode;
       this.settings.bridgeBaseUrl = DEFAULT_SETTINGS.bridgeBaseUrl;
     }
+    this.settings.panelSize = normalizePanelSize(this.settings.panelSize);
+    this.settings.panelPosition = normalizePanelPosition(this.settings.panelPosition);
     this.integrations = {
       grokConfigured: Boolean(stored[STORAGE_KEYS.INTEGRATIONS]?.grokConfigured),
       grokModel: this.settings.grokModel,
@@ -137,6 +140,12 @@ export class DataRepository {
     }
     if (Object.hasOwn(allowed, "bridgeBaseUrl")) {
       allowed.bridgeBaseUrl = normalizeBridgeBaseUrl(allowed.bridgeBaseUrl);
+    }
+    if (Object.hasOwn(allowed, "panelSize")) {
+      allowed.panelSize = normalizePanelSize(allowed.panelSize);
+    }
+    if (Object.hasOwn(allowed, "panelPosition")) {
+      allowed.panelPosition = normalizePanelPosition(allowed.panelPosition);
     }
     this.settings = { ...this.settings, ...allowed };
     this.integrations = {

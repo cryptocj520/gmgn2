@@ -1,5 +1,6 @@
 import { LIMITS } from "../../shared/constants.js";
 import { formatClock, formatMonthDayClock, shortAddress } from "../../shared/token.js";
+import { PanelLayoutController } from "./panel-layout-controller.js";
 import { PANEL_STYLES } from "./panel-styles.js";
 
 export class MonitorPanel {
@@ -25,6 +26,13 @@ export class MonitorPanel {
     this.shadow = host.attachShadow({ mode: "open" });
     this.shadow.innerHTML = `<style>${PANEL_STYLES}</style>${this.template()}`;
     this.captureElements();
+    this.layout = new PanelLayoutController({
+      panel: this.elements.panel,
+      dragHandle: this.elements.panelHeader,
+      shrinkButton: this.elements.shrinkPanelButton,
+      growButton: this.elements.growPanelButton,
+      onChange: (patch) => this.savePanelLayout(patch),
+    });
     this.bindEvents();
     this.unsubscribe = this.engine.subscribe((state) => this.render(state));
   }
@@ -33,11 +41,13 @@ export class MonitorPanel {
     return `
       <button class="launcher" id="launcher" type="button" title="打开 GMGN 热门监控"><span class="launcher-icon">♪</span><span class="launcher-badge" id="launcherBadge">0</span></button>
       <section class="panel" id="panel" aria-label="GMGN 热门币监控">
-        <header class="header">
+        <header class="header" id="panelHeader" tabindex="0" aria-label="悬浮面板，可拖动或使用方向键移动">
           <span class="brand-mark"></span>
           <div class="title-wrap"><div class="title">GMGN 热门监控</div><div class="subtitle"><span class="status-dot" id="statusDot"></span><span id="statusText">正在准备</span></div></div>
+          <button class="icon-button size-button" id="shrinkPanelButton" type="button" title="缩小面板">−</button>
+          <button class="icon-button size-button" id="growPanelButton" type="button" title="放大面板">+</button>
           <button class="icon-button" id="settingsButton" type="button" title="设置">⚙</button>
-          <button class="icon-button" id="collapseButton" type="button" title="收起">×</button>
+          <button class="icon-button" id="collapseButton" type="button" title="隐藏面板（监控继续运行）">×</button>
         </header>
         <div class="toolbar"><div class="primary-row">
           <button class="primary" id="startButton" type="button"><span id="startIcon">▶</span><span id="startLabel">开始监控</span></button>
@@ -51,7 +61,7 @@ export class MonitorPanel {
           <div class="stat"><span class="stat-value" id="scanValue">--:--</span><span class="stat-label">最近扫描</span></div>
         </div>
         <div class="content"><div class="section-head"><span class="section-title">提醒记录</span><span class="section-count" id="eventCount">0 条</span></div><div class="events" id="events"></div></div>
-        <footer class="footer"><span class="footer-state"></span><span>全局合约去重 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.13.2</span></footer>
+        <footer class="footer"><span class="footer-state"></span><span>全局合约去重 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.13.3</span></footer>
         <aside class="settings" id="settingsPanel">
           <h2 class="settings-title">监控设置</h2>
           ${this.toggleSetting("autoStartToggle", "打开页面自动监控", "首次榜单仍会静默建立基线")}
@@ -93,8 +103,8 @@ export class MonitorPanel {
 
   captureElements() {
     const ids = [
-      "launcher", "launcherBadge", "panel", "statusDot", "statusText", "settingsButton",
-      "collapseButton", "settingsPanel", "startButton", "startIcon", "startLabel", "soundToggle",
+      "launcher", "launcherBadge", "panel", "panelHeader", "statusDot", "statusText", "settingsButton",
+      "shrinkPanelButton", "growPanelButton", "collapseButton", "settingsPanel", "startButton", "startIcon", "startLabel", "soundToggle",
       "testSoundButton", "seenValue", "currentValue", "newValue", "scanValue", "eventCount",
       "events", "autoStartToggle", "desktopToggle", "autoRefreshToggle", "narrativeToggle", "intervalSelect",
       "connectionTimeoutSeconds", "retentionDays", "alertTopN",
@@ -210,6 +220,7 @@ export class MonitorPanel {
     this.elements.autoRefreshToggle.checked = settings.autoRefreshOnStall;
     this.elements.narrativeToggle.checked = settings.narrativeEnabled;
     this.elements.intervalSelect.value = String(settings.intervalSeconds);
+    this.layout.apply(settings);
     if (this.shadow.activeElement !== this.elements.connectionTimeoutSeconds) {
       this.elements.connectionTimeoutSeconds.value = String(settings.connectionTimeoutSeconds);
     }
@@ -219,6 +230,11 @@ export class MonitorPanel {
     if (this.shadow.activeElement !== this.elements.retentionDays) {
       this.elements.retentionDays.value = String(settings.retentionDays);
     }
+  }
+
+  savePanelLayout(patch) {
+    return this.engine.updateSettings(patch)
+      .catch((error) => this.showToast(error.message || "面板布局保存失败", true));
   }
 
   renderEvents(events) {
@@ -305,14 +321,12 @@ export class MonitorPanel {
     this.selectedEventKey = `${event.id}:${event.detectedAt}`;
     this.settingsOpen = false;
     this.elements.settingsPanel.classList.remove("show");
-    this.elements.panel.classList.add("detail-open");
     this.elements.narrativeDetail.classList.add("show");
     this.renderNarrativeDetail(event);
   }
 
   closeNarrative() {
     this.selectedEventKey = "";
-    this.elements.panel.classList.remove("detail-open");
     this.elements.narrativeDetail.classList.remove("show");
   }
 
