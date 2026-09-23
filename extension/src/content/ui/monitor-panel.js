@@ -61,14 +61,14 @@ export class MonitorPanel {
           <div class="stat"><span class="stat-value" id="scanValue">--:--</span><span class="stat-label">最近扫描</span></div>
         </div>
         <div class="content"><div class="section-head"><span class="section-title">提醒记录</span><span class="section-count" id="eventCount">0 条</span></div><div class="events" id="events"></div></div>
-        <footer class="footer"><span class="footer-state"></span><span>首次进入提醒名次 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.13.4</span></footer>
+        <footer class="footer"><span class="footer-state"></span><span>首次进入提醒名次 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.14.0</span></footer>
         <aside class="settings" id="settingsPanel">
           <h2 class="settings-title">监控设置</h2>
           ${this.toggleSetting("autoStartToggle", "打开页面自动监控", "首次榜单仍会静默建立基线")}
           ${this.toggleSetting("desktopToggle", "桌面通知", "声音以外再显示系统通知")}
           ${this.toggleSetting("autoRefreshToggle", "连接超时自动刷新", "读取 GMGN 底部连接状态")}
           ${this.toggleSetting("narrativeToggle", "自动叙事分析", "报警后调用 Grok 分析")}
-          <div class="setting-row"><div class="setting-main"><div class="setting-name">本地分析服务</div><div class="setting-note">插件只发送公开代币数据</div></div><span class="api-state" id="narrativeApiState">未配对</span></div>
+          <div class="setting-row"><div class="setting-main"><div class="setting-name">Grok API</div><div class="setting-note">在扩展弹窗中配置接口和密钥</div></div><span class="api-state" id="narrativeApiState">未配置</span></div>
           <button class="action-button manual-analysis" id="manualNarrativeButton" type="button">手动分析当前榜首</button>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">成交额提醒名次</div><div class="setting-note">首次进入前 N 名时提醒</div></div><input class="number-input" id="alertTopN" type="number" min="1" max="100" step="1" aria-label="成交额提醒前几名"><span class="unit">名</span></div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">扫描间隔</div><div class="setting-note">页面变化也会触发扫描</div></div><select id="intervalSelect" aria-label="扫描间隔"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></div>
@@ -364,7 +364,7 @@ export class MonitorPanel {
     const states = {
       queued: "Grok 分析排队中…",
       retrying: "Grok 分析重试中…",
-      waiting_key: "等待配置本地分析服务",
+      waiting_key: "等待 AI 配置或授权",
       cancelled: "自动叙事分析已关闭",
       failed: "叙事分析失败 · 点击查看",
     };
@@ -376,8 +376,8 @@ export class MonitorPanel {
   renderIntegration(integration) {
     if (!integration) return;
     this.integration = integration;
-    this.elements.narrativeApiState.textContent = integration.bridgeConfigured ? "已配对" : "未配对";
-    this.elements.narrativeApiState.classList.toggle("ready", integration.bridgeConfigured);
+    this.elements.narrativeApiState.textContent = integration.grokConfigured ? "已配置" : "未配置";
+    this.elements.narrativeApiState.classList.toggle("ready", integration.grokConfigured);
   }
 
   openNarrative(event) {
@@ -409,7 +409,7 @@ export class MonitorPanel {
     const statusText = {
       queued: "Grok 正在搜索公开资料并生成叙事分析…",
       retrying: "首次请求失败，正在进行最后一次重试…",
-      waiting_key: "尚未配置本地分析服务。配对后可手动重新分析本条提醒。",
+      waiting_key: "尚未完成 AI 配置或未授权访问接口。保存配置后可手动重新分析本条提醒。",
       cancelled: narrative?.error || "自动叙事分析已关闭",
       failed: narrative?.error || "叙事分析失败",
     };
@@ -418,7 +418,7 @@ export class MonitorPanel {
     this.elements.detailStatus.className = `detail-status ${narrative?.status || "idle"}`;
     this.elements.detailContent.hidden = !ready;
     const canRetry = ["ready", "failed", "cancelled"].includes(narrative?.status) ||
-      (narrative?.status === "waiting_key" && this.integration?.bridgeConfigured);
+      (narrative?.status === "waiting_key" && this.integration?.grokConfigured);
     this.elements.retryNarrative.hidden = !canRetry;
     if (!ready) return;
 

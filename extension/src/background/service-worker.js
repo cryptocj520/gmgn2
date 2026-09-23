@@ -1,27 +1,35 @@
 import { AlertService } from "./alert-service.js";
+import { AiConfigStore } from "./ai-config-store.js";
+import { AiUsageStore } from "./ai-usage-store.js";
 import { DataRepository } from "./data-repository.js";
-import { LocalAnalysisClient } from "./local-analysis-client.js";
+import { GrokNarrativeService } from "./grok-narrative-service.js";
 import { NarrativeCoordinator } from "./narrative-coordinator.js";
-import { OffscreenBridgeClient } from "./offscreen-bridge-client.js";
+import { OffscreenAiClient } from "./offscreen-ai-client.js";
 import { SecretVault } from "./secret-vault.js";
 import { MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
 
 const repository = new DataRepository();
 const alerts = new AlertService();
-const secretVault = new SecretVault();
-const offscreenBridge = new OffscreenBridgeClient();
-const localAnalyzer = new LocalAnalysisClient(offscreenBridge);
-const narratives = new NarrativeCoordinator(repository, localAnalyzer, secretVault);
+const aiConfigStore = new AiConfigStore(chrome.storage.local, new SecretVault());
+const narratives = new NarrativeCoordinator(
+  repository,
+  new GrokNarrativeService(new OffscreenAiClient(), new AiUsageStore()),
+  aiConfigStore,
+);
 
 const handlers = {
   [MESSAGE.GET_BOOTSTRAP]: async () => {
-    const bootstrap = await repository.getBootstrap();
-    const [grokConfigured, bridgeConfigured] = await Promise.all([
-      secretVault.isGrokConfigured(),
-      secretVault.isBridgeConfigured(),
+    const [bootstrap, aiConfig] = await Promise.all([
+      repository.getBootstrap(),
+      aiConfigStore.getPublic(),
     ]);
-    bootstrap.integrations.grokConfigured = grokConfigured;
-    bootstrap.integrations.bridgeConfigured = bridgeConfigured;
+    bootstrap.aiConfig = aiConfig;
+    bootstrap.integrations = {
+      ...bootstrap.integrations,
+      grokConfigured: aiConfig.configured,
+      grokModel: aiConfig.grokModel,
+      grokBaseUrl: aiConfig.grokBaseUrl,
+    };
     return bootstrap;
   },
   [MESSAGE.PROCESS_SCAN]: async (message, sender) => {
@@ -53,14 +61,10 @@ const handlers = {
     await chrome.action.setBadgeText({ tabId: sender.tab.id, text });
     return null;
   },
-  [MESSAGE.TEST_GROK_API]: () => narratives.testApiKey(),
+  [MESSAGE.TEST_GROK_API]: (message) => narratives.testApiKey(message),
   [MESSAGE.RETRY_NARRATIVE]: (message) => narratives.retryNarrative(message.tokenId, message.detectedAt),
   [MESSAGE.MANUAL_NARRATIVE]: (message) => narratives.queueManual(message.token),
-  [MESSAGE.SAVE_LOCAL_ANALYZER]: (message) => narratives.saveLocalConnection({
-    bridgeBaseUrl: message.bridgeBaseUrl,
-    bridgeToken: message.bridgeToken,
-  }),
-  [MESSAGE.MIGRATE_LEGACY_AI_CONFIG]: () => narratives.migrateLegacyConfig(),
+  [MESSAGE.SAVE_AI_CONFIG]: (message) => narratives.saveAiConfig(message),
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -71,7 +75,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   Promise.resolve(handler(message, sender))
     .then((data) => sendResponse({ ok: true, data }))
     .catch((error) => {
-      console.error("[后台] 消息处理失败", error);
+      console.error("[后台] 消息处理失败", error?.message || "后台处理失败");
       sendResponse({ ok: false, error: error?.message || "后台处理失败" });
     });
   return true;
@@ -79,7 +83,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.runtime.onInstalled.addListener(() => repository.initialize());
 chrome.alarms.onAlarm.addListener((alarm) => {
-  narratives.handleAlarm(alarm).catch((error) => console.error("[叙事队列] 任务处理失败", error));
+  narratives.handleAlarm(alarm).catch((error) => console.error("[叙事队列] 任务处理失败", error?.message || "任务处理失败"));
 });
 
-narratives.resume().catch((error) => console.error("[叙事队列] 恢复任务失败", error));
+narratives.resume().catch((error) => console.error("[叙事队列] 恢复任务失败", error?.message || "恢复任务失败"));

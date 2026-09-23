@@ -1,14 +1,16 @@
 import { GROK } from "../shared/constants.js";
 import {
-  normalizeBridgeBaseUrl,
-  permissionPatternForBridgeUrl,
+  normalizeAiConfig,
+  permissionPatternForBaseUrl,
+  publicAiConfig,
+  reuseSavedApiKey,
 } from "../shared/grok-config.js";
 
 export class NarrativeCoordinator {
-  constructor(repository, service, secretVault) {
+  constructor(repository, service, aiConfigStore) {
     this.repository = repository;
     this.service = service;
-    this.secretVault = secretVault;
+    this.aiConfigStore = aiConfigStore;
     this.processingQueues = Array.from(
       { length: GROK.MAX_CONCURRENT_ANALYSES },
       () => Promise.resolve(),
@@ -18,63 +20,59 @@ export class NarrativeCoordinator {
 
   async queueAlerts(tokens, settings) {
     if (!settings.narrativeEnabled || !tokens.length) return this.repository.getSummary();
-    const bridgeToken = await this.secretVault.getBridgeToken();
-    if (!bridgeToken) return this.repository.markNarrativesWaitingForKey(tokens);
+    if (!await this.aiConfigStore.isConfigured()) return this.repository.markNarrativesWaitingForKey(tokens);
+    const publicConfig = await this.aiConfigStore.getPublic();
+    if (!await this.hasAiPermission(publicConfig.grokBaseUrl)) {
+      return this.repository.markNarrativesWaitingForKey(tokens);
+    }
     const queued = await this.repository.queueNarratives(tokens);
     queued.jobIds.forEach((jobId) => this.schedule(jobId));
     return queued.summary;
   }
 
-  async testApiKey() {
-    const { settings } = await this.repository.getBootstrap();
-    const bridgeToken = await this.secretVault.getBridgeToken();
-    const transportConfig = await this.buildLocalConfig(settings, bridgeToken);
-    const analyzer = await this.service.status(transportConfig);
-    return { ...this.repository.getIntegrationStatus(), analyzer };
-  }
-
-  async saveLocalConnection(config = {}) {
-    const current = (await this.repository.getBootstrap()).settings;
-    const bridgeBaseUrl = normalizeBridgeBaseUrl(config.bridgeBaseUrl || current.bridgeBaseUrl);
-    const bridgeToken = String(config.bridgeToken || "").trim();
-    const existingBridgeToken = await this.secretVault.getBridgeToken();
-    if (!bridgeToken && !existingBridgeToken) throw new Error("请输入本地分析服务令牌");
-    if (bridgeToken && bridgeToken.length < 16) throw new Error("本地分析服务令牌格式不完整");
-    await this.repository.updateSettings({ bridgeBaseUrl, bridgeFallbackEnabled: true });
-    if (bridgeToken) await this.secretVault.saveBridgeToken(bridgeToken);
-    const integration = await this.repository.setBridgeConfigured(true);
-    await this.resumeWaitingNarratives();
-    return integration;
-  }
-
-  async migrateLegacyConfig() {
-    const [apiKey, bridgeToken, bootstrap] = await Promise.all([
-      this.secretVault.getGrokApiKey(),
-      this.secretVault.getBridgeToken(),
-      this.repository.getBootstrap(),
-    ]);
-    if (!apiKey) throw new Error("插件中没有可迁移的旧 API Key");
-    const config = await this.buildLocalConfig(bootstrap.settings, bridgeToken);
-    const migrated = await this.service.migrate(config, {
-      grokBaseUrl: bootstrap.settings.grokBaseUrl,
-      grokModel: bootstrap.settings.grokModel,
-      apiMode: bootstrap.settings.grokApiMode === "chat_completions" ? "chat_completions" : "responses",
-      searchMode: "native",
-      enableXSearch: bootstrap.settings.grokEnableXSearch,
-      timeoutSeconds: 90,
+  async testApiKey(input = {}) {
+    const saved = await this.aiConfigStore.get();
+    const apiKey = reuseSavedApiKey(saved, input.grokBaseUrl || saved.grokBaseUrl, input.apiKey);
+    const config = normalizeAiConfig({
+      ...saved,
+      ...input,
       apiKey,
     });
-    await this.secretVault.clearGrokApiKey();
-    await this.repository.setGrokConfigured(false);
-    await this.resumeWaitingNarratives();
-    return { ...this.repository.getIntegrationStatus(), analyzer: migrated };
+    await this.ensureAiPermission(config.grokBaseUrl);
+    const result = await this.service.validateApiKey(config);
+    return { ...await this.integrationStatus(saved), testSearch: result.search || null };
+  }
+
+  async saveAiConfig(input = {}) {
+    const apiKey = String(input.apiKey || "").trim();
+    if (apiKey && apiKey.length < 8) throw new Error("API Key 格式不完整");
+    const saved = await this.aiConfigStore.save({
+      grokBaseUrl: input.grokBaseUrl,
+      grokModel: input.grokModel,
+      apiMode: input.apiMode || input.grokApiMode,
+      authType: input.authType,
+      enableWebSearch: input.enableWebSearch,
+      enableXSearch: input.enableXSearch,
+      timeoutSeconds: input.timeoutSeconds,
+      apiKey,
+    });
+    await this.ensureAiPermission(saved.grokBaseUrl);
+    await this.repository.setGrokConfigured(true, {
+      grokModel: saved.grokModel,
+      grokBaseUrl: saved.grokBaseUrl,
+    });
+    if (await this.hasAiPermission(saved.grokBaseUrl)) await this.resumeWaitingNarratives();
+    return this.integrationStatus(saved);
   }
 
   async retryNarrative(tokenId, detectedAt) {
     const event = await this.repository.getNarrativeEvent(tokenId, detectedAt);
     if (!event) throw new Error("找不到对应提醒记录");
-    const bridgeToken = await this.secretVault.getBridgeToken();
-    if (!bridgeToken) return this.repository.markNarrativesWaitingForKey([event]);
+    if (!await this.aiConfigStore.isConfigured()) return this.repository.markNarrativesWaitingForKey([event]);
+    const publicConfig = await this.aiConfigStore.getPublic();
+    if (!await this.hasAiPermission(publicConfig.grokBaseUrl)) {
+      throw new Error("请先保存配置并允许访问 AI 地址");
+    }
     const queued = await this.repository.queueNarratives([event]);
     queued.jobIds.forEach((jobId) => this.schedule(jobId));
     return queued.summary;
@@ -82,8 +80,11 @@ export class NarrativeCoordinator {
 
   async queueManual(token) {
     if (!token?.id || !token?.address) throw new Error("当前榜首缺少合约信息，无法分析");
-    const bridgeToken = await this.secretVault.getBridgeToken();
-    if (!bridgeToken) throw new Error("尚未配置本地分析服务令牌");
+    if (!await this.aiConfigStore.isConfigured()) throw new Error("尚未配置 API Key");
+    const publicConfig = await this.aiConfigStore.getPublic();
+    if (!await this.hasAiPermission(publicConfig.grokBaseUrl)) {
+      throw new Error("请先保存配置并允许访问 AI 地址");
+    }
     const event = await this.repository.createManualNarrativeEvent(token);
     const queued = await this.repository.queueNarratives([event]);
     queued.jobIds.forEach((jobId) => this.schedule(jobId));
@@ -94,18 +95,30 @@ export class NarrativeCoordinator {
   }
 
   async resume() {
-    const [grokConfigured, bridgeConfigured] = await Promise.all([
-      this.secretVault.isGrokConfigured(),
-      this.secretVault.isBridgeConfigured(),
-    ]);
-    await this.repository.setGrokConfigured(grokConfigured);
-    await this.repository.setBridgeConfigured(bridgeConfigured);
-    if (bridgeConfigured) await this.resumeWaitingNarratives();
+    const configured = await this.aiConfigStore.isConfigured();
+    const publicConfig = await this.aiConfigStore.getPublic();
+    await this.repository.setGrokConfigured(configured, {
+      grokModel: publicConfig.grokModel,
+      grokBaseUrl: publicConfig.grokBaseUrl,
+    });
+    const allowed = configured && await this.hasAiPermission(publicConfig.grokBaseUrl);
+    if (allowed) await this.resumeWaitingNarratives();
+    const { settings } = await this.repository.getBootstrap();
     const jobs = await this.repository.getNarrativeJobs();
-    jobs.forEach((job) => this.schedule(job.jobId));
+    if (!allowed) {
+      for (const job of jobs) await this.repository.parkNarrativeJob(job.jobId);
+      return;
+    }
+    jobs.forEach((job) => {
+      if (settings.narrativeEnabled || job.token?.manual) this.schedule(job.jobId);
+    });
   }
 
   async resumeWaitingNarratives() {
+    const { settings } = await this.repository.getBootstrap();
+    if (!settings.narrativeEnabled) return;
+    const publicConfig = await this.aiConfigStore.getPublic();
+    if (!await this.hasAiPermission(publicConfig.grokBaseUrl)) return;
     const waiting = await this.repository.getWaitingNarrativeEvents();
     if (!waiting.length) return;
     const queued = await this.repository.queueNarratives(waiting);
@@ -133,16 +146,18 @@ export class NarrativeCoordinator {
       return;
     }
     const job = claim.job;
-    const bridgeToken = await this.secretVault.getBridgeToken();
-    if (!bridgeToken) {
-      await this.repository.failNarrativeJob(jobId, "本地分析服务令牌已移除");
+    if (!await this.aiConfigStore.isConfigured()) {
+      await this.repository.failNarrativeJob(jobId, "API Key 已移除");
       return;
     }
 
     try {
-      const { settings } = await this.repository.getBootstrap();
-      const transportConfig = await this.buildLocalConfig(settings, bridgeToken);
-      const analysis = await this.service.analyze(job.token, transportConfig);
+      const config = await this.aiConfigStore.getRuntimeConfig();
+      if (!await this.hasAiPermission(config.grokBaseUrl)) {
+        await this.repository.parkNarrativeJob(jobId);
+        return;
+      }
+      const analysis = await this.service.analyze(job.token, config);
       await this.repository.completeNarrativeJob(jobId, analysis);
     } catch (error) {
       const canRetry = error.retryable && job.attempts < GROK.MAX_RETRIES;
@@ -151,17 +166,31 @@ export class NarrativeCoordinator {
         this.schedule(jobId, GROK.RETRY_DELAY_MS);
         return;
       }
-      console.error("[叙事分析] Grok 分析失败", error);
+      console.error("[叙事分析] Grok 分析失败", error.message || "Grok 分析失败");
       await this.repository.failNarrativeJob(jobId, error.message || "Grok 分析失败");
     }
   }
 
-  async buildLocalConfig(settings, bridgeToken) {
-    if (!bridgeToken) throw new Error("尚未配置本地分析服务令牌");
-    const bridgeRequestEnabled = await chrome.permissions.contains({
-      origins: [permissionPatternForBridgeUrl(settings.bridgeBaseUrl)],
-    });
-    if (!bridgeRequestEnabled) throw new Error("本地分析服务权限未生效，请重新加载插件");
-    return { bridgeBaseUrl: settings.bridgeBaseUrl, bridgeToken };
+  async hasAiPermission(baseUrl) {
+    try {
+      return await chrome.permissions.contains({
+        origins: [permissionPatternForBaseUrl(baseUrl)],
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async ensureAiPermission(baseUrl) {
+    if (!await this.hasAiPermission(baseUrl)) {
+      throw new Error("AI 地址访问权限未生效，请重新保存配置");
+    }
+  }
+
+  async integrationStatus(config) {
+    return {
+      ...this.repository.getIntegrationStatus(),
+      ...publicAiConfig(config),
+    };
   }
 }

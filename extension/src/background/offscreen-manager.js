@@ -23,7 +23,7 @@ async function ensureReady() {
       url: OFFSCREEN_PATH,
       // AUDIO_PLAYBACK 会在 30 秒无声音后强制关闭，长分析必须使用无时限类型。
       reasons: ["BLOBS"],
-      justification: "处理本地桥接响应，并提供新代币提醒音",
+      justification: "处理 AI 长请求响应，并提供新代币提醒音",
     });
   }
 

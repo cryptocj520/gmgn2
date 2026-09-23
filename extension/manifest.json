@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GMGN 热门币监控",
-  "version": "0.13.4",
+  "version": "0.14.0",
   "description": "监控 GMGN 热门榜，发现前排新代币时提醒并使用 Grok 分析叙事。",
   "permissions": [
     "storage",
@@ -11,9 +11,11 @@
     "alarms"
   ],
   "host_permissions": [
-    "https://gmgn.ai/*",
-    "http://127.0.0.1/*",
-    "http://localhost/*"
+    "https://gmgn.ai/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "src/background/service-worker.js",

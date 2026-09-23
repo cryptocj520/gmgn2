@@ -1,5 +1,6 @@
 import { MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
 import { playAlertTone } from "../shared/alert-tone.js";
+import { isLoopbackHost } from "../shared/grok-config.js";
 
 let audioContext = null;
 
@@ -12,20 +13,10 @@ async function playAlert() {
   playAlertTone(audioContext);
 }
 
-async function bridgeFetch(message) {
-  const target = new URL(String(message.url || ""));
-  const allowedPath = target.pathname === "/analyze" ||
-    target.pathname === "/analysis-status" ||
-    target.pathname === "/config";
-  if (!["127.0.0.1", "localhost"].includes(target.hostname) || !allowedPath) {
-    throw new Error("隐藏文档只允许访问本机桥接接口");
-  }
-  if (!["http:", "https:"].includes(target.protocol)) {
-    throw new Error("本机桥接协议无效");
-  }
-
+async function aiFetch(message) {
+  const target = assertAllowedAiUrl(message.url);
   const controller = new AbortController();
-  const timeoutMs = Math.max(1000, Math.min(200000, Number(message.timeoutMs) || 90000));
+  const timeoutMs = Math.max(1000, Math.min(330000, Number(message.timeoutMs) || 180000));
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(target.href, {
@@ -33,6 +24,7 @@ async function bridgeFetch(message) {
       headers: message.headers || {},
       body: message.method === "GET" ? undefined : String(message.body || ""),
       cache: "no-store",
+      redirect: "error",
       signal: controller.signal,
     });
     const responseBody = await response.blob();
@@ -47,10 +39,32 @@ async function bridgeFetch(message) {
   }
 }
 
+function assertAllowedAiUrl(href) {
+  let target;
+  try {
+    target = new URL(String(href || ""));
+  } catch (_) {
+    throw new Error("AI 地址不是有效网址");
+  }
+  if (!["http:", "https:"].includes(target.protocol)) {
+    throw new Error("AI 地址只支持 HTTP 或 HTTPS");
+  }
+  if (target.protocol === "http:" && !isLoopbackHost(target.hostname)) {
+    throw new Error("远程接口必须使用 HTTPS");
+  }
+  if (target.username || target.password || target.search || target.hash) {
+    throw new Error("AI 地址不能包含账号、密码、查询参数或片段");
+  }
+  if (!/\/(responses|chat\/completions)$/i.test(target.pathname.replace(/\/+$/, ""))) {
+    throw new Error("隐藏文档只允许访问 AI 对话接口");
+  }
+  return target;
+}
+
 const handlers = Object.freeze({
   [MESSAGE.OFFSCREEN_PING]: async () => ({}),
   [MESSAGE.PLAY_SOUND]: () => playAlert().then(() => ({})),
-  [MESSAGE.BRIDGE_FETCH]: bridgeFetch,
+  [MESSAGE.AI_FETCH]: aiFetch,
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -62,9 +76,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     .catch((error) => sendResponse({
       ok: false,
       error: error?.name === "AbortError"
-        ? "本地桥接请求超时"
-        : /failed to fetch|fetch failed|econnrefused/i.test(error?.message || "")
-          ? "无法连接本地分析服务，请确认 bridge/start.command 正在运行"
+        ? "分析请求超时"
+        : /failed to fetch|fetch failed|networkerror/i.test(error?.message || "")
+          ? "无法连接 AI 接口，请检查地址和权限"
           : error?.message || "隐藏文档处理失败",
     }));
   return true;
