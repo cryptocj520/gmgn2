@@ -70,6 +70,11 @@ export class MonitorPanel {
           ${this.toggleSetting("narrativeToggle", "自动叙事分析", "报警后调用 Grok 分析")}
           <div class="setting-row"><div class="setting-main"><div class="setting-name">Grok API</div><div class="setting-note">在扩展弹窗中配置接口和密钥</div></div><span class="api-state" id="narrativeApiState">未配置</span></div>
           <button class="action-button manual-analysis" id="manualNarrativeButton" type="button">手动分析当前榜首</button>
+          <div class="ca-action">
+            <label for="manualCaAddress">分析指定 CA</label>
+            <input id="manualCaAddress" type="text" placeholder="合约地址，沿用当前热门榜页面的链" autocomplete="off" spellcheck="false">
+            <button class="action-button manual-analysis" id="manualCaNarrative" type="button">分析该 CA</button>
+          </div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">成交额提醒名次</div><div class="setting-note">首次进入前 N 名时提醒</div></div><input class="number-input" id="alertTopN" type="number" min="1" max="100" step="1" aria-label="成交额提醒前几名"><span class="unit">名</span></div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">扫描间隔</div><div class="setting-note">页面变化也会触发扫描</div></div><select id="intervalSelect" aria-label="扫描间隔"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">连接异常等待</div><div class="setting-note">持续异常后才自动刷新</div></div><input class="number-input" id="connectionTimeoutSeconds" type="number" min="10" max="300" step="5" aria-label="连接异常等待秒数"><span class="unit">秒</span></div>
@@ -116,6 +121,7 @@ export class MonitorPanel {
       "detailStoryPeople", "detailStoryWhyNow", "detailStoryTimeline", "detailMarketContext",
       "detailConfirmed", "detailClaims", "detailUnknowns",
       "detailRisks", "detailSources", "retryNarrative", "manualNarrativeButton",
+      "manualCaAddress", "manualCaNarrative",
     ];
     this.elements = Object.fromEntries(ids.map((id) => [id, this.shadow.getElementById(id)]));
   }
@@ -182,6 +188,12 @@ export class MonitorPanel {
     this.elements.detailBack.addEventListener("click", () => this.closeNarrative());
     this.elements.retryNarrative.addEventListener("click", () => this.retrySelectedNarrative());
     this.elements.manualNarrativeButton.addEventListener("click", () => this.analyzeTopToken());
+    this.elements.manualCaNarrative.addEventListener("click", () => this.analyzeManualCa());
+    this.elements.manualCaAddress.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      this.analyzeManualCa();
+    });
   }
 
   bindSetting(elementId, key) {
@@ -552,8 +564,14 @@ export class MonitorPanel {
     }
   }
 
+  setNarrativeActionsDisabled(disabled) {
+    this.elements.manualNarrativeButton.disabled = disabled;
+    this.elements.manualCaNarrative.disabled = disabled;
+    this.elements.manualCaAddress.disabled = disabled;
+  }
+
   async analyzeTopToken() {
-    this.elements.manualNarrativeButton.disabled = true;
+    this.setNarrativeActionsDisabled(true);
     try {
       const event = await this.engine.analyzeTopToken();
       this.settingsOpen = false;
@@ -563,7 +581,22 @@ export class MonitorPanel {
     } catch (error) {
       this.showToast(error.message || "手动分析失败", true);
     } finally {
-      this.elements.manualNarrativeButton.disabled = false;
+      this.setNarrativeActionsDisabled(false);
+    }
+  }
+
+  async analyzeManualCa() {
+    this.setNarrativeActionsDisabled(true);
+    try {
+      const event = await this.engine.analyzeContract(this.elements.manualCaAddress.value);
+      this.settingsOpen = false;
+      this.elements.settingsPanel.classList.remove("show");
+      this.openNarrative(event);
+      this.showToast("已提交指定 CA 分析");
+    } catch (error) {
+      this.showToast(error.message || "手动分析失败", true);
+    } finally {
+      this.setNarrativeActionsDisabled(false);
     }
   }
 

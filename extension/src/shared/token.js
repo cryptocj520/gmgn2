@@ -72,3 +72,31 @@ export function shortAddress(address) {
   if (!address || address.length < 12) return address || "";
   return `${address.slice(0, 5)}…${address.slice(-4)}`;
 }
+
+export function parseManualContractAddress(raw) {
+  const address = String(raw || "").trim();
+  if (!address) throw new Error("请输入合约地址");
+  if (/\s/.test(address)) throw new Error("合约地址不能包含空格");
+  if (address.length < 20 || address.length > 128) throw new Error("合约地址格式不正确");
+  if (/^0x/i.test(address)) {
+    if (!/^0x[a-fA-F0-9]{40,80}$/.test(address)) throw new Error("合约地址格式不正确");
+    return `0x${address.slice(2)}`;
+  }
+  if (!/^[A-Za-z0-9_.:-]+$/.test(address)) throw new Error("合约地址格式不正确");
+  if (/^[0-9_.:-]+$/.test(address)) throw new Error("合约地址格式不正确");
+  return address;
+}
+
+export function buildMinimalCaToken(chain, address) {
+  const parsed = parseTokenHref(`https://gmgn.ai/${encodeURIComponent(String(chain || "").trim())}/token/${encodeURIComponent(address)}`);
+  if (!parsed?.chain || !parsed?.address || !parsed?.id) throw new Error("无法读取当前页面的链信息");
+  const label = shortAddress(parsed.address) || parsed.address;
+  return {
+    chain: parsed.chain,
+    address: parsed.address,
+    id: parsed.id,
+    url: parsed.url,
+    symbol: label,
+    name: label,
+  };
+}

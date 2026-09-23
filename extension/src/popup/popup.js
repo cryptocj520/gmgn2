@@ -7,7 +7,7 @@ import {
   normalizeTimeoutSeconds,
   permissionPatternForBaseUrl,
 } from "../shared/grok-config.js";
-import { formatClock } from "../shared/token.js";
+import { buildMinimalCaToken, formatClock, parseManualContractAddress } from "../shared/token.js";
 
 const settingIds = [
   "autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "alertTopN",
@@ -17,7 +17,7 @@ const elements = Object.fromEntries([
   ...settingIds, "seenCount", "eventCount", "updatedAt", "testSound", "openGmgn", "message",
   "analyzerStatus", "grokBaseUrl", "grokModelInput", "grokApiMode", "grokAuthType", "timeoutSeconds",
   "enableWebSearch", "enableXSearch", "grokApiKey", "toggleKey",
-  "saveAnalyzer", "testAnalyzer", "manualTopNarrative", "openSettingsTab",
+  "saveAnalyzer", "testAnalyzer", "manualTopNarrative", "manualCaAddress", "manualCaNarrative", "openSettingsTab",
 ].map((id) => [id, document.getElementById(id)]));
 let currentSettings = null;
 let currentAiConfig = null;
@@ -219,31 +219,70 @@ elements.testAnalyzer.addEventListener("click", async () => {
   }
 });
 
+function setNarrativeActionsDisabled(disabled) {
+  elements.manualTopNarrative.disabled = disabled;
+  elements.manualCaNarrative.disabled = disabled;
+  elements.manualCaAddress.disabled = disabled;
+}
+
+async function readCurrentPageTopToken() {
+  const tabs = await chrome.tabs.query({ url: "https://gmgn.ai/trend*" });
+  const tab = tabs.find((item) => item.active) || tabs[0];
+  if (!tab?.id) throw new Error("请先打开 GMGN 热门榜页面");
+  let topTokenResponse;
+  try {
+    topTokenResponse = await chrome.tabs.sendMessage(tab.id, {
+      target: MESSAGE_TARGET.CONTENT,
+      type: MESSAGE.GET_CURRENT_TOP_TOKEN,
+    });
+  } catch (error) {
+    const disconnected = /Receiving end does not exist|Extension context invalidated/i.test(error?.message || "");
+    throw new Error(disconnected ? "GMGN 页面仍在使用旧插件，请刷新该页面后重试" : error.message);
+  }
+  if (!topTokenResponse?.ok) throw new Error(topTokenResponse?.error || "无法读取当前榜首");
+  return topTokenResponse.token;
+}
+
 elements.manualTopNarrative.addEventListener("click", async () => {
-  elements.manualTopNarrative.disabled = true;
+  setNarrativeActionsDisabled(true);
   showMessage("正在读取 GMGN 当前榜首…");
   try {
-    const tabs = await chrome.tabs.query({ url: "https://gmgn.ai/trend*" });
-    const tab = tabs.find((item) => item.active) || tabs[0];
-    if (!tab?.id) throw new Error("请先打开 GMGN 热门榜页面");
-    let topTokenResponse;
-    try {
-      topTokenResponse = await chrome.tabs.sendMessage(tab.id, {
-        target: MESSAGE_TARGET.CONTENT,
-        type: MESSAGE.GET_CURRENT_TOP_TOKEN,
-      });
-    } catch (error) {
-      const disconnected = /Receiving end does not exist|Extension context invalidated/i.test(error?.message || "");
-      throw new Error(disconnected ? "GMGN 页面仍在使用旧插件，请刷新该页面后重试" : error.message);
-    }
-    if (!topTokenResponse?.ok) throw new Error(topTokenResponse?.error || "无法读取当前榜首");
-    await request(MESSAGE.MANUAL_NARRATIVE, { token: topTokenResponse.token });
-    showMessage(`已发送 ${topTokenResponse.token.symbol || "榜首代币"}，结果将在 GMGN 面板显示`);
+    const token = await readCurrentPageTopToken();
+    await request(MESSAGE.MANUAL_NARRATIVE, { token });
+    showMessage(`已发送 ${token.symbol || "榜首代币"}，结果将在 GMGN 面板显示`);
   } catch (error) {
     showMessage(error.message || "手动分析失败", true);
   } finally {
-    elements.manualTopNarrative.disabled = false;
+    setNarrativeActionsDisabled(false);
   }
+});
+
+elements.manualCaNarrative.addEventListener("click", async () => {
+  let address;
+  try {
+    address = parseManualContractAddress(elements.manualCaAddress.value);
+  } catch (error) {
+    showMessage(error.message, true);
+    return;
+  }
+  setNarrativeActionsDisabled(true);
+  showMessage("正在读取当前页面链信息…");
+  try {
+    const pageToken = await readCurrentPageTopToken();
+    const token = buildMinimalCaToken(pageToken?.chain, address);
+    await request(MESSAGE.MANUAL_NARRATIVE, { token });
+    showMessage(`已发送 ${token.symbol || "该合约"}，结果将在 GMGN 面板显示`);
+  } catch (error) {
+    showMessage(error.message || "手动分析失败", true);
+  } finally {
+    setNarrativeActionsDisabled(false);
+  }
+});
+
+elements.manualCaAddress.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  elements.manualCaNarrative.click();
 });
 
 elements.testSound.addEventListener("click", async () => {

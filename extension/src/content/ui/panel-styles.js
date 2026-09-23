@@ -153,6 +153,11 @@ export const PANEL_STYLES = `
   .action-button { height: 34px; border-radius: 6px; border: 1px solid #3b4239; background: #1b1f1b; color: #d8ded5; cursor: pointer; }
   .action-button:disabled { opacity: .5; cursor: wait; }
   .manual-analysis { width: 100%; margin-top: 12px; color: #d9f99d; border-color: #52613e; }
+  .ca-action { display: grid; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #292e28; }
+  .ca-action label { color: #dce1da; font-size: 11px; }
+  .ca-action input { width: 100%; height: 34px; padding: 0 9px; color: #eef2eb; background: #1b1f1b; border: 1px solid #3b4239; border-radius: 6px; }
+  .ca-action .manual-analysis { margin-top: 0; }
+  .ca-action input:disabled { opacity: .5; cursor: wait; }
   .action-button.danger { color: #ff8e7c; border-color: #5b3731; }
   .footer { min-height: 35px; display: flex; align-items: center; gap: 7px; padding: 0 14px; color: #788175; background: #151815; border-top: 1px solid #2d322c; font-size: 10px; }
   .footer-state { width: 6px; height: 6px; border-radius: 50%; background: #c9f26b; }

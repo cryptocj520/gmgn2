@@ -79,7 +79,7 @@ export class NarrativeCoordinator {
   }
 
   async queueManual(token) {
-    if (!token?.id || !token?.address) throw new Error("当前榜首缺少合约信息，无法分析");
+    if (!token?.id || !token?.address) throw new Error("缺少合约信息，无法分析");
     if (!await this.aiConfigStore.isConfigured()) throw new Error("尚未配置 API Key");
     const publicConfig = await this.aiConfigStore.getPublic();
     if (!await this.hasAiPermission(publicConfig.grokBaseUrl)) {

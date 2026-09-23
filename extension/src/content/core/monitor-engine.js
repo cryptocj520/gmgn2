@@ -1,4 +1,5 @@
 import { SCANNER } from "../../shared/constants.js";
+import { buildMinimalCaToken, parseManualContractAddress } from "../../shared/token.js";
 
 const STATUS = Object.freeze({
   IDLE: "idle",
@@ -211,6 +212,15 @@ export class MonitorEngine {
 
   async analyzeTopToken() {
     const token = await this.getCurrentTopToken();
+    const result = await this.gateway.manualNarrative(token);
+    this.patchState({ events: result.summary.recentEvents });
+    return result.event;
+  }
+
+  async analyzeContract(rawAddress) {
+    const address = parseManualContractAddress(rawAddress);
+    const pageToken = await this.getCurrentTopToken();
+    const token = buildMinimalCaToken(pageToken?.chain, address);
     const result = await this.gateway.manualNarrative(token);
     this.patchState({ events: result.summary.recentEvents });
     return result.event;

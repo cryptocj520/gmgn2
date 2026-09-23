@@ -69,6 +69,11 @@ body.is-tab .open-tab { display: none; }
 .key-section p { margin: 8px 0 0; color: #6f796c; font-size: 10px; line-height: 16px; }
 .manual-action { width: 100%; margin-top: 9px; color: #d9f99d; background: #1b2118; border: 1px solid #52613e; }
 .manual-action:disabled { opacity: .5; cursor: wait; }
+.ca-action { display: grid; gap: 7px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #292e28; }
+.ca-action label { color: #dce1da; font-size: 11px; }
+.ca-action input { width: 100%; height: 34px; padding: 0 9px; color: #eef2eb; background: #1b1f1b; border: 1px solid #3b4239; border-radius: 6px; }
+.ca-action .manual-action { margin-top: 0; }
+.ca-action input:disabled { opacity: .5; cursor: wait; }
 .local-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 12px; }
 .local-actions button:disabled { opacity: .5; cursor: wait; }
 .message { min-height: 20px; padding: 0 16px 10px; color: #8f998c; font-size: 10px; text-align: center; }
