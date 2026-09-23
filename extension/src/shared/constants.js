@@ -29,7 +29,7 @@ export const STORAGE_KEYS = Object.freeze({
   INTEGRATIONS: "gmgnMonitorIntegrationsV1",
 });
 
-export const DATA_SCHEMA_VERSION = 5;
+export const DATA_SCHEMA_VERSION = 6;
 
 export const DEFAULT_SETTINGS = Object.freeze({
   autoStart: true,

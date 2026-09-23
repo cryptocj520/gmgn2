@@ -26,10 +26,10 @@
   <div class="panes">
     <main class="pane active" id="monitorPane">
       <label class="setting"><span><b>打开页面自动监控</b><small>首次榜单静默建立基线</small></span><input id="autoStart" type="checkbox" role="switch"></label>
-      <label class="setting"><span><b>声音提醒</b><small>发现新代币时播放</small></span><input id="sound" type="checkbox" role="switch"></label>
+      <label class="setting"><span><b>声音提醒</b><small>首次进入提醒名次时播放</small></span><input id="sound" type="checkbox" role="switch"></label>
       <label class="setting"><span><b>桌面通知</b><small>同时显示系统通知</small></span><input id="desktopNotifications" type="checkbox" role="switch"></label>
       <label class="setting"><span><b>连接超时自动刷新</b><small>读取 GMGN 底部连接状态</small></span><input id="autoRefreshOnStall" type="checkbox" role="switch"></label>
-      <label class="setting"><span><b>成交额提醒名次</b><small>仅首次发现且进入前 N 名</small></span><span class="number-wrap"><input id="alertTopN" type="number" min="1" max="100" step="1"><i>名</i></span></label>
+      <label class="setting"><span><b>成交额提醒名次</b><small>首次进入前 N 名时提醒</small></span><span class="number-wrap"><input id="alertTopN" type="number" min="1" max="100" step="1"><i>名</i></span></label>
       <label class="setting"><span><b>扫描间隔</b><small>页面变化也会立即扫描</small></span><select id="intervalSeconds"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></label>
       <label class="setting"><span><b>连接异常等待</b><small>持续异常后才刷新</small></span><span class="number-wrap"><input id="connectionTimeoutSeconds" type="number" min="10" max="300" step="5"><i>秒</i></span></label>
       <label class="setting"><span><b>缺席记录保留</b><small>连续未出现后自动删除</small></span><span class="number-wrap"><input id="retentionDays" type="number" min="1" max="365" step="1"><i>天</i></span></label>

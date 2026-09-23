@@ -22,10 +22,10 @@ export class AlertService {
     const first = report.alerts[0];
     const remaining = report.alerts.length - 1;
     const title = report.alerts.length === 1
-      ? `发现新币：${first.symbol || "未知代币"}`
-      : `发现 ${report.alerts.length} 个前排新币`;
+      ? `首次进入提醒名次：${first.symbol || "未知代币"}`
+      : `${report.alerts.length} 个代币首次进入提醒名次`;
     const message = remaining > 0
-      ? `${first.symbol || first.address} 等 ${remaining + 1} 个代币首次进入榜单`
+      ? `${first.symbol || first.address} 等 ${remaining + 1} 个代币首次进入提醒名次`
       : `${first.chain.toUpperCase()} · ${first.marketCap || "市值未知"}`;
 
     await chrome.notifications.create(`gmgn-${Date.now()}`, {

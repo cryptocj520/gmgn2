@@ -61,7 +61,7 @@ export class MonitorPanel {
           <div class="stat"><span class="stat-value" id="scanValue">--:--</span><span class="stat-label">最近扫描</span></div>
         </div>
         <div class="content"><div class="section-head"><span class="section-title">提醒记录</span><span class="section-count" id="eventCount">0 条</span></div><div class="events" id="events"></div></div>
-        <footer class="footer"><span class="footer-state"></span><span>全局合约去重 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.13.3</span></footer>
+        <footer class="footer"><span class="footer-state"></span><span>首次进入提醒名次 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.13.4</span></footer>
         <aside class="settings" id="settingsPanel">
           <h2 class="settings-title">监控设置</h2>
           ${this.toggleSetting("autoStartToggle", "打开页面自动监控", "首次榜单仍会静默建立基线")}
@@ -70,7 +70,7 @@ export class MonitorPanel {
           ${this.toggleSetting("narrativeToggle", "自动叙事分析", "报警后调用 Grok 分析")}
           <div class="setting-row"><div class="setting-main"><div class="setting-name">本地分析服务</div><div class="setting-note">插件只发送公开代币数据</div></div><span class="api-state" id="narrativeApiState">未配对</span></div>
           <button class="action-button manual-analysis" id="manualNarrativeButton" type="button">手动分析当前榜首</button>
-          <div class="setting-row"><div class="setting-main"><div class="setting-name">成交额提醒名次</div><div class="setting-note">仅首次发现且进入前 N 名</div></div><input class="number-input" id="alertTopN" type="number" min="1" max="100" step="1" aria-label="成交额提醒前几名"><span class="unit">名</span></div>
+          <div class="setting-row"><div class="setting-main"><div class="setting-name">成交额提醒名次</div><div class="setting-note">首次进入前 N 名时提醒</div></div><input class="number-input" id="alertTopN" type="number" min="1" max="100" step="1" aria-label="成交额提醒前几名"><span class="unit">名</span></div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">扫描间隔</div><div class="setting-note">页面变化也会触发扫描</div></div><select id="intervalSelect" aria-label="扫描间隔"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">连接异常等待</div><div class="setting-note">持续异常后才自动刷新</div></div><input class="number-input" id="connectionTimeoutSeconds" type="number" min="10" max="300" step="5" aria-label="连接异常等待秒数"><span class="unit">秒</span></div>
           <div class="setting-row"><div class="setting-main"><div class="setting-name">缺席记录保留</div><div class="setting-note">连续未出现后自动删除</div></div><input class="number-input" id="retentionDays" type="number" min="1" max="365" step="1" aria-label="缺席记录保留天数"><span class="unit">天</span></div>
@@ -250,10 +250,14 @@ export class MonitorPanel {
   }
 
   createEvent(event) {
-    const row = document.createElement("button");
+    const row = document.createElement("div");
     row.className = "event";
-    row.type = "button";
-    row.addEventListener("click", () => this.openNarrative(event));
+
+    const openButton = document.createElement("button");
+    openButton.className = "event-open";
+    openButton.type = "button";
+    openButton.setAttribute("aria-label", `查看 ${event.symbol || "未知代币"} 的叙事分析`);
+    openButton.addEventListener("click", () => this.openNarrative(event));
 
     const image = document.createElement("span");
     image.className = "token-image";
@@ -293,8 +297,67 @@ export class MonitorPanel {
     time.className = "event-time";
     time.textContent = formatMonthDayClock(event.detectedAt || event.firstSeen);
     side.append(marketCap, time);
-    row.append(image, main, side);
+
+    const copyButton = document.createElement("button");
+    copyButton.className = "copy-address";
+    copyButton.type = "button";
+    copyButton.title = "复制代币地址";
+    copyButton.setAttribute("aria-label", `复制 ${event.symbol || "该代币"} 的地址`);
+    copyButton.textContent = "⧉";
+    copyButton.addEventListener("click", () => this.copyTokenAddress(event, copyButton));
+
+    openButton.append(image, main, side);
+    row.append(openButton, copyButton);
     return row;
+  }
+
+  async copyTokenAddress(event, button) {
+    const address = event.address || String(event.id || "").split(":").slice(1).join(":");
+    if (!address) {
+      this.showToast("该提醒没有可复制的代币地址", true);
+      return;
+    }
+
+    try {
+      await this.writeClipboard(address);
+      button.classList.add("copied");
+      button.textContent = "✓";
+      button.title = "已复制";
+      this.showToast("代币地址已复制");
+      setTimeout(() => {
+        if (!button.isConnected) return;
+        button.classList.remove("copied");
+        button.textContent = "⧉";
+        button.title = "复制代币地址";
+      }, 1400);
+    } catch (_) {
+      this.showToast("复制失败，请检查浏览器剪贴板权限", true);
+    }
+  }
+
+  async writeClipboard(value) {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value);
+        return;
+      } catch (_) {
+        // 浏览器拒绝新接口时，继续尝试兼容复制方式。
+      }
+    }
+
+    const input = document.createElement("textarea");
+    input.value = value;
+    input.readOnly = true;
+    input.style.cssText = "position:fixed;opacity:0;pointer-events:none";
+    this.shadow.appendChild(input);
+    let copied = false;
+    try {
+      input.select();
+      copied = document.execCommand("copy");
+    } finally {
+      input.remove();
+    }
+    if (!copied) throw new Error("浏览器拒绝复制操作");
   }
 
   narrativePreview(event) {
@@ -516,7 +579,7 @@ export class MonitorPanel {
     clearInterval(this.titleTimer);
     let ticks = 0;
     this.titleTimer = setInterval(() => {
-      document.title = ticks % 2 ? this.originalTitle : `【${count} 个新币】GMGN`;
+      document.title = ticks % 2 ? this.originalTitle : `【${count} 个排名提醒】GMGN`;
       ticks += 1;
       if (ticks >= 8) {
         clearInterval(this.titleTimer);

@@ -97,12 +97,27 @@ export const PANEL_STYLES = `
   .empty { height: 100%; min-height: 150px; display: grid; place-items: center; color: #727b70; text-align: center; }
   .empty-glyph { display: block; color: #4e564c; font-size: 24px; margin-bottom: 7px; }
   .event {
-    width: 100%; text-align: left; background: transparent; cursor: pointer;
-    display: grid; grid-template-columns: 36px minmax(0,1fr) auto; gap: 10px;
-    align-items: center; min-height: 68px; padding: 9px 12px 9px 14px;
-    color: inherit; text-decoration: none; border-bottom: 1px solid #252a24;
+    width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) 30px; gap: 2px;
+    align-items: center; padding-right: 8px; background: transparent;
+    color: inherit; border-bottom: 1px solid #252a24;
   }
-  .event:hover { background: #1a1e1a; }
+  .event:hover, .event:focus-within { background: #1a1e1a; }
+  .event-open {
+    min-width: 0; text-align: left; background: transparent; cursor: pointer;
+    display: grid; grid-template-columns: 36px minmax(0,1fr) auto; gap: 10px;
+    align-items: center; min-height: 68px; padding: 9px 4px 9px 14px;
+    color: inherit; text-decoration: none;
+  }
+  .event-open:focus-visible, .copy-address:focus-visible {
+    outline: 2px solid #9dc863; outline-offset: -2px;
+  }
+  .copy-address {
+    width: 30px; height: 30px; display: grid; place-items: center;
+    border-radius: 6px; background: transparent; color: #7f897c;
+    cursor: pointer; font-size: 16px; line-height: 1;
+  }
+  .copy-address:hover { background: #2a3028; color: #d9f99d; }
+  .copy-address.copied { background: #23351c; color: #bdf27c; }
   .token-image {
     width: 36px; height: 36px; display: grid; place-items: center; overflow: hidden;
     border-radius: 6px; background: #2a3028; color: #c9f26b; font-weight: 800;

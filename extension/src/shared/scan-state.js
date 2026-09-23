@@ -23,6 +23,11 @@ export function applyScanToState(currentState, tokens, options) {
   );
   const removed = Object.keys(state.tokens).length - retainedEntries.length;
   const retainedTokens = Object.fromEntries(retainedEntries);
+  const previousAlertTimes = new Map(
+    state.events
+      .filter((event) => !event.manual && event.id && Number.isFinite(event.detectedAt))
+      .map((event) => [event.id, event.detectedAt]),
+  );
   const tokensWithAbsence = completeSnapshot
     ? Object.entries(retainedTokens).reduce((records, [id, token]) => {
         records[id] = currentIds.has(id)
@@ -33,12 +38,20 @@ export function applyScanToState(currentState, tokens, options) {
     : retainedTokens;
   const seenBeforeScan = new Set(Object.keys(tokensWithAbsence));
   const fresh = baseline ? [] : tokens.filter((token) => !seenBeforeScan.has(token.id));
-  const alerts = fresh.filter((token) =>
-    Number.isInteger(token.rank) && token.rank >= 1 && token.rank <= options.alertTopN
-  );
+  const isInAlertRange = (token) =>
+    Number.isInteger(token.rank) && token.rank >= 1 && token.rank <= options.alertTopN;
+  const wasAlerted = (token) => {
+    const previous = tokensWithAbsence[token.id];
+    return Boolean(previous) && (Number.isFinite(previous.alertedAt) || previousAlertTimes.has(token.id));
+  };
+  const alerts = baseline ? [] : tokens.filter((token) => isInAlertRange(token) && !wasAlerted(token));
+  const alertIds = new Set(alerts.map((token) => token.id));
 
   const updatedTokens = tokens.reduce((records, token) => {
     const previous = tokensWithAbsence[token.id];
+    const previousAlertedAt = previous
+      ? (Number.isFinite(previous.alertedAt) ? previous.alertedAt : previousAlertTimes.get(token.id))
+      : undefined;
     records[token.id] = {
       ...previous,
       ...token,
@@ -48,6 +61,7 @@ export function applyScanToState(currentState, tokens, options) {
         : previous?.lastAppearedAt || previous?.lastSeen || previous?.firstSeen || now,
       missingSince: null,
       baseline: previous ? previous.baseline : baseline,
+      alertedAt: previousAlertedAt ?? ((baseline && isInAlertRange(token)) || alertIds.has(token.id) ? now : null),
     };
     return records;
   }, { ...tokensWithAbsence });

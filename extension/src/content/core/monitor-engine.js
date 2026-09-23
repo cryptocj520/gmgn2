@@ -123,7 +123,7 @@ export class MonitorEngine {
         lastFresh: alerts,
         status: alerts.length ? STATUS.FOUND : STATUS.RUNNING,
         statusText: alerts.length
-          ? `发现 ${alerts.length} 个前排新币`
+          ? `${alerts.length} 个代币首次进入提醒名次`
           : report.removed
             ? `已清理 ${report.removed} 个过期记录`
             : "监控中",
