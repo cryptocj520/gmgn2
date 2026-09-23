@@ -21,6 +21,10 @@
     "service_worker": "src/background/service-worker.js",
     "type": "module"
   },
+  "options_ui": {
+    "page": "src/popup/popup.html",
+    "open_in_tab": true
+  },
   "action": {
     "default_title": "GMGN 热门币监控",
     "default_popup": "src/popup/popup.html",

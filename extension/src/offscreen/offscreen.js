@@ -1,6 +1,5 @@
 import { MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
 import { playAlertTone } from "../shared/alert-tone.js";
-import { isLoopbackHost } from "../shared/grok-config.js";
 
 let audioContext = null;
 
@@ -48,9 +47,6 @@ function assertAllowedAiUrl(href) {
   }
   if (!["http:", "https:"].includes(target.protocol)) {
     throw new Error("AI 地址只支持 HTTP 或 HTTPS");
-  }
-  if (target.protocol === "http:" && !isLoopbackHost(target.hostname)) {
-    throw new Error("远程接口必须使用 HTTPS");
   }
   if (target.username || target.password || target.search || target.hash) {
     throw new Error("AI 地址不能包含账号、密码、查询参数或片段");

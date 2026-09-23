@@ -37,11 +37,12 @@
 
     <section class="pane narrative-pane" id="narrativePane">
       <div class="integration-head"><div><b>Grok API</b><small>和 chanlun-ai 一样，插件直接请求你填写的 AI 地址</small></div><span class="api-status" id="analyzerStatus">未配置</span></div>
+      <button id="openSettingsTab" class="open-tab" type="button">在独立页面填写（不会自动关掉）</button>
       <label class="setting"><span><b>自动叙事分析</b><small>仅分析触发提醒的代币</small></span><input id="narrativeEnabled" type="checkbox" role="switch"></label>
       <label class="setting"><span><b>Web 搜索</b><small>检索公开网页资料</small></span><input id="enableWebSearch" type="checkbox" role="switch"></label>
       <label class="setting"><span><b>X 搜索</b><small>检索带原帖链接的讨论</small></span><input id="enableXSearch" type="checkbox" role="switch"></label>
       <div class="config-fields">
-        <label><span>接口地址</span><input id="grokBaseUrl" type="url" placeholder="https://api.x.ai/v1" autocomplete="off" spellcheck="false"></label>
+        <label><span>接口地址</span><input id="grokBaseUrl" type="url" value="http://192.119.105.12:9434/v1" placeholder="http://192.119.105.12:9434/v1" autocomplete="off" spellcheck="false"></label>
         <label><span>模型名称</span><input id="grokModelInput" type="text" placeholder="grok-4.6" autocomplete="off" spellcheck="false"></label>
         <label><span>协议</span><select id="grokApiMode"><option value="openai-responses">OpenAI Responses</option><option value="openai-chat">OpenAI Chat Completions</option></select></label>
         <label><span>鉴权</span><select id="grokAuthType"><option value="auto">自动</option><option value="bearer">Authorization: Bearer</option><option value="x-api-key">x-api-key</option></select></label>

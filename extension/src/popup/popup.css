@@ -48,6 +48,8 @@ button { height: 36px; border: 0; border-radius: 6px; cursor: pointer; }
 .secondary.text { font-size: 11px; }
 .danger { color: #ff9c8b; background: transparent; border: 1px solid #623a34; }
 .narrative-pane { padding-top: 12px; }
+.open-tab { width: 100%; height: 30px; margin: 10px 0 2px; color: #dce6c8; background: #1b2118; border: 1px solid #3d4a32; font-size: 11px; }
+body.is-tab .open-tab { display: none; }
 .integration-head { height: 48px; display: flex; align-items: center; border-bottom: 1px solid #292e28; }
 .integration-head > div { flex: 1; }
 .integration-head b { display: block; color: #f3f6f1; font-size: 13px; }
@@ -72,3 +74,11 @@ button { height: 36px; border: 0; border-radius: 6px; cursor: pointer; }
 .message { min-height: 20px; padding: 0 16px 10px; color: #8f998c; font-size: 10px; text-align: center; }
 .message.error { color: #ff8e7c; }
 @media (prefers-reduced-motion: reduce) { input[role="switch"]::after { transition: none; } }
+@media (min-width: 520px) {
+  body {
+    width: min(560px, 100%); height: auto; min-height: 100vh; margin: 0 auto;
+    overflow: auto; grid-template-rows: 62px auto 39px auto auto auto;
+  }
+  .panes { min-height: 0; }
+  .pane { height: auto; overflow: visible; padding-bottom: 24px; }
+}

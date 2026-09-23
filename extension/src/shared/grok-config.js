@@ -28,9 +28,6 @@ export function normalizeGrokBaseUrl(value) {
   if (!["http:", "https:"].includes(url.protocol)) {
     throw new Error("中转地址只支持 HTTP 或 HTTPS");
   }
-  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
-    throw new Error("远程接口必须使用 HTTPS");
-  }
   if (url.username || url.password || url.search || url.hash) {
     throw new Error("中转地址不能包含账号、密码、查询参数或片段");
   }

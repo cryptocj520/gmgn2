@@ -31,7 +31,7 @@ API Key 保存在扩展自己的 `chrome.storage.local` 中，不会写入监控
 从 v0.14.0 起，插件不再需要启动 `bridge/start.command`，也不再填写本机配对令牌。仓库里的 `bridge/` 目录只是旧代码，日常使用不用打开。
 
 1. 点击浏览器工具栏里的扩展图标，打开“叙事分析”。
-2. 填写接口地址、协议、鉴权、模型、超时时间和 API Key。地址可以只写到 `/v1`，插件会按 chanlun-ai 的方式自动补上 `/responses` 或 `/chat/completions`。远程地址必须是 HTTPS；只有本机可以用 HTTP。
+2. 填写接口地址、协议、鉴权、模型、超时时间和 API Key。地址可以只写到 `/v1`，插件会按 chanlun-ai 的方式自动补上 `/responses` 或 `/chat/completions`。`http://` 和 `https://` 都可以，本机、局域网和远程都行。
 3. 按需打开 Web 搜索和 X 搜索。联网检索只支持 OpenAI Responses。
 4. 点击“保存配置”。Chrome 会询问是否允许插件访问该 AI 地址，选择允许。
 5. “测试连接”会真的发一次 AI 请求（不是查 `/models`）。开了检索时会要求中转站返回 Web/X 调用证据。测试成功后仍需保存才会用于正式分析。

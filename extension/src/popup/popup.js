@@ -1,4 +1,4 @@
-import { GMGN_URL, MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
+import { GMGN_URL, GROK, MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
 import {
   normalizeAuthType,
   normalizeGrokApiMode,
@@ -17,7 +17,7 @@ const elements = Object.fromEntries([
   ...settingIds, "seenCount", "eventCount", "updatedAt", "testSound", "openGmgn", "message",
   "analyzerStatus", "grokBaseUrl", "grokModelInput", "grokApiMode", "grokAuthType", "timeoutSeconds",
   "enableWebSearch", "enableXSearch", "grokApiKey", "toggleKey",
-  "saveAnalyzer", "testAnalyzer", "manualTopNarrative",
+  "saveAnalyzer", "testAnalyzer", "manualTopNarrative", "openSettingsTab",
 ].map((id) => [id, document.getElementById(id)]));
 let currentSettings = null;
 let currentAiConfig = null;
@@ -53,8 +53,11 @@ function render(bootstrap) {
   elements.intervalSeconds.value = String(settings.intervalSeconds);
   elements.connectionTimeoutSeconds.value = String(settings.connectionTimeoutSeconds);
   elements.retentionDays.value = String(settings.retentionDays);
-  elements.grokBaseUrl.value = currentAiConfig.grokBaseUrl || "";
-  elements.grokModelInput.value = currentAiConfig.grokModel || "";
+  const configured = Boolean(currentAiConfig.configured || currentAiConfig.grokConfigured);
+  elements.grokBaseUrl.value = configured
+    ? (currentAiConfig.grokBaseUrl || GROK.API_BASE_URL)
+    : GROK.API_BASE_URL;
+  elements.grokModelInput.value = currentAiConfig.grokModel || GROK.MODEL;
   elements.grokApiMode.value = currentAiConfig.apiMode || "openai-responses";
   elements.grokAuthType.value = currentAiConfig.authType || "auto";
   elements.timeoutSeconds.value = String(currentAiConfig.timeoutSeconds || 180);
@@ -86,15 +89,24 @@ settingIds.forEach((id) => {
   });
 });
 
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((item) => {
-      const selected = item === tab;
-      item.classList.toggle("active", selected);
-      item.setAttribute("aria-selected", String(selected));
-    });
-    document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("active", pane.id === tab.dataset.pane));
+function showPane(paneId) {
+  document.querySelectorAll(".tab").forEach((item) => {
+    const selected = item.dataset.pane === paneId;
+    item.classList.toggle("active", selected);
+    item.setAttribute("aria-selected", String(selected));
   });
+  document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("active", pane.id === paneId));
+}
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => showPane(tab.dataset.pane));
+});
+
+if (!chrome.windows || window.innerWidth > 400) document.body.classList.add("is-tab");
+if (location.hash === "#narrative") showPane("narrativePane");
+
+elements.openSettingsTab.addEventListener("click", () => {
+  chrome.tabs.create({ url: `${chrome.runtime.getURL("src/popup/popup.html")}#narrative` });
 });
 
 elements.toggleKey.addEventListener("click", () => {

@@ -60,7 +60,7 @@ export const LIMITS = Object.freeze({
 });
 
 export const GROK = Object.freeze({
-  API_BASE_URL: "https://api.x.ai/v1",
+  API_BASE_URL: "http://192.119.105.12:9434/v1",
   MODEL: "grok-4.6",
   REQUEST_TIMEOUT_MS: 180000,
   VALIDATION_TIMEOUT_MS: 180000,
