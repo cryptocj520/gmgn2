@@ -375,6 +375,7 @@ export class MonitorPanel {
   narrativePreview(event) {
     const states = {
       queued: "Grok 分析排队中…",
+      processing: "Grok 正在分析…",
       retrying: "Grok 分析重试中…",
       waiting_key: "等待 AI 配置或授权",
       cancelled: "自动叙事分析已关闭",
@@ -419,7 +420,8 @@ export class MonitorPanel {
     this.elements.detailTokenLink.href = event.url;
     const narrative = event.narrative;
     const statusText = {
-      queued: "Grok 正在搜索公开资料并生成叙事分析…",
+      queued: "已加入分析队列，上一条完成后开始。",
+      processing: "Grok 正在搜索公开资料并生成叙事分析…",
       retrying: "首次请求失败，正在进行最后一次重试…",
       waiting_key: "尚未完成 AI 配置或未授权访问接口。保存配置后可手动重新分析本条提醒。",
       cancelled: narrative?.error || "自动叙事分析已关闭",

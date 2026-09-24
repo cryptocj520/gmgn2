@@ -238,8 +238,14 @@ export class DataRepository {
         leaseUntil: now + leaseMs,
         startedAt: now,
       };
+      const events = this.updateEventNarrative(updatedJob, {
+        status: "processing",
+        jobId,
+        updatedAt: now,
+      });
       this.data = {
         ...this.data,
+        events,
         narrativeJobs: { ...this.data.narrativeJobs, [jobId]: updatedJob },
         updatedAt: now,
       };

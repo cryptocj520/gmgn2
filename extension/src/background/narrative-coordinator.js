@@ -148,6 +148,7 @@ export class NarrativeCoordinator {
     const job = claim.job;
     if (!await this.aiConfigStore.isConfigured()) {
       await this.repository.failNarrativeJob(jobId, "API Key 已移除");
+      await this.kickQueuedJobs();
       return;
     }
 
@@ -155,6 +156,7 @@ export class NarrativeCoordinator {
       const config = await this.aiConfigStore.getRuntimeConfig();
       if (!await this.hasAiPermission(config.grokBaseUrl)) {
         await this.repository.parkNarrativeJob(jobId);
+        await this.kickQueuedJobs();
         return;
       }
       const analysis = await this.service.analyze(job.token, config);
@@ -164,11 +166,20 @@ export class NarrativeCoordinator {
       if (canRetry) {
         await this.repository.retryNarrativeJob(jobId, error.message);
         this.schedule(jobId, GROK.RETRY_DELAY_MS);
+        await this.kickQueuedJobs();
         return;
       }
       console.error("[叙事分析] Grok 分析失败", error.message || "Grok 分析失败");
       await this.repository.failNarrativeJob(jobId, error.message || "Grok 分析失败");
     }
+    await this.kickQueuedJobs();
+  }
+
+  async kickQueuedJobs() {
+    const jobs = await this.repository.getNarrativeJobs();
+    jobs
+      .filter((item) => item.status === "queued" || item.status === "retrying")
+      .forEach((item) => this.schedule(item.jobId, 100));
   }
 
   async hasAiPermission(baseUrl) {

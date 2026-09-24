@@ -129,7 +129,7 @@ export const PANEL_STYLES = `
   .chain { color: #9da797; font-size: 10px; text-transform: uppercase; }
   .event-meta { display: block; margin-top: 4px; color: #828b7f; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .event-meta.narrative-ready { color: #c9f26b; }
-  .event-meta.narrative-queued, .event-meta.narrative-retrying { color: #eabf65; }
+  .event-meta.narrative-queued, .event-meta.narrative-processing, .event-meta.narrative-retrying { color: #eabf65; }
   .event-meta.narrative-failed, .event-meta.narrative-waiting_key, .event-meta.narrative-cancelled { color: #d38b7f; }
   .event-side { text-align: right; }
   .market-cap { display: block; color: #eabf65; font-size: 12px; font-weight: 650; }
