@@ -7,14 +7,13 @@ export const MESSAGE = Object.freeze({
   CLEAR_DATA: "CLEAR_DATA",
   UPDATE_BADGE: "UPDATE_BADGE",
   PLAY_SOUND: "PLAY_SOUND",
-  BRIDGE_FETCH: "BRIDGE_FETCH",
+  AI_FETCH: "AI_FETCH",
   OFFSCREEN_PING: "OFFSCREEN_PING",
   TEST_GROK_API: "TEST_GROK_API",
   RETRY_NARRATIVE: "RETRY_NARRATIVE",
   MANUAL_NARRATIVE: "MANUAL_NARRATIVE",
   GET_CURRENT_TOP_TOKEN: "GET_CURRENT_TOP_TOKEN",
-  SAVE_LOCAL_ANALYZER: "SAVE_LOCAL_ANALYZER",
-  MIGRATE_LEGACY_AI_CONFIG: "MIGRATE_LEGACY_AI_CONFIG",
+  SAVE_AI_CONFIG: "SAVE_AI_CONFIG",
 });
 
 export const MESSAGE_TARGET = Object.freeze({
@@ -27,6 +26,8 @@ export const STORAGE_KEYS = Object.freeze({
   DATA: "gmgnMonitorDataV2",
   SETTINGS: "gmgnMonitorSettingsV2",
   INTEGRATIONS: "gmgnMonitorIntegrationsV1",
+  AI_CONFIG: "gmgnAiConfigV1",
+  AI_USAGE: "gmgnAiUsageV1",
 });
 
 export const DATA_SCHEMA_VERSION = 6;
@@ -41,12 +42,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
   connectionTimeoutSeconds: 30,
   alertTopN: 5,
   narrativeEnabled: true,
-  grokBaseUrl: "https://api.x.ai/v1",
-  grokModel: "grok-4.6",
-  grokApiMode: "auto",
-  grokEnableXSearch: true,
-  bridgeFallbackEnabled: true,
-  bridgeBaseUrl: "http://127.0.0.1:18761",
   panelSize: "small",
   panelPosition: null,
 });
@@ -65,17 +60,21 @@ export const LIMITS = Object.freeze({
 });
 
 export const GROK = Object.freeze({
-  API_BASE_URL: "https://api.x.ai/v1",
+  API_BASE_URL: "http://192.119.105.12:9434/v1",
   MODEL: "grok-4.6",
-  REQUEST_TIMEOUT_MS: 90000,
-  VALIDATION_TIMEOUT_MS: 15000,
+  REQUEST_TIMEOUT_MS: 180000,
+  VALIDATION_TIMEOUT_MS: 180000,
+  MAX_OUTPUT_TOKENS: 4000,
   MAX_TOOL_CALLS: 3,
   MAX_CONCURRENT_ANALYSES: 1,
-  PROCESSING_LEASE_MS: 200000,
+  PROCESSING_LEASE_MS: 330000,
   MAX_RETRIES: 1,
   RETRY_DELAY_MS: 15000,
   ALARM_PREFIX: "gmgn-narrative:",
-  BRIDGE_BASE_URL: "http://127.0.0.1:18761",
+  MIN_TIMEOUT_SECONDS: 15,
+  MAX_TIMEOUT_SECONDS: 300,
+  DEFAULT_TIMEOUT_SECONDS: 180,
+  MAX_USAGE_RECORDS: 200,
 });
 
 export const WATCHDOG = Object.freeze({

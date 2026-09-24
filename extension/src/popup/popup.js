@@ -1,6 +1,13 @@
-import { GMGN_URL, MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
-import { normalizeBridgeBaseUrl, permissionPatternForBridgeUrl } from "../shared/grok-config.js";
-import { formatClock } from "../shared/token.js";
+import { GMGN_URL, GROK, MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
+import {
+  normalizeAuthType,
+  normalizeGrokApiMode,
+  normalizeGrokBaseUrl,
+  normalizeGrokModel,
+  normalizeTimeoutSeconds,
+  permissionPatternForBaseUrl,
+} from "../shared/grok-config.js";
+import { buildMinimalCaToken, formatClock, parseManualContractAddress } from "../shared/token.js";
 
 const settingIds = [
   "autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "alertTopN",
@@ -8,11 +15,12 @@ const settingIds = [
 ];
 const elements = Object.fromEntries([
   ...settingIds, "seenCount", "eventCount", "updatedAt", "testSound", "openGmgn", "message",
-  "analyzerStatus", "bridgeBaseUrl", "bridgeToken", "bridgeStatus", "toggleBridgeToken",
-  "saveAnalyzer", "testAnalyzer", "openAnalyzerSettings", "migrateLegacyConfig", "manualTopNarrative",
+  "analyzerStatus", "grokBaseUrl", "grokModelInput", "grokApiMode", "grokAuthType", "timeoutSeconds",
+  "enableWebSearch", "enableXSearch", "grokApiKey", "toggleKey",
+  "saveAnalyzer", "testAnalyzer", "manualTopNarrative", "manualCaAddress", "manualCaNarrative", "openSettingsTab",
 ].map((id) => [id, document.getElementById(id)]));
 let currentSettings = null;
-let currentIntegration = null;
+let currentAiConfig = null;
 
 async function request(type, payload = {}) {
   try {
@@ -35,9 +43,9 @@ function showMessage(text, isError = false) {
 }
 
 function render(bootstrap) {
-  const { settings, summary, integrations } = bootstrap;
+  const { settings, summary, integrations, aiConfig } = bootstrap;
   currentSettings = settings;
-  currentIntegration = integrations;
+  currentAiConfig = aiConfig || integrations;
   for (const id of ["autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "narrativeEnabled"]) {
     elements[id].checked = settings[id];
   }
@@ -45,21 +53,28 @@ function render(bootstrap) {
   elements.intervalSeconds.value = String(settings.intervalSeconds);
   elements.connectionTimeoutSeconds.value = String(settings.connectionTimeoutSeconds);
   elements.retentionDays.value = String(settings.retentionDays);
-  elements.bridgeBaseUrl.value = settings.bridgeBaseUrl;
+  const configured = Boolean(currentAiConfig.configured || currentAiConfig.grokConfigured);
+  elements.grokBaseUrl.value = configured
+    ? (currentAiConfig.grokBaseUrl || GROK.API_BASE_URL)
+    : GROK.API_BASE_URL;
+  elements.grokModelInput.value = currentAiConfig.grokModel || GROK.MODEL;
+  elements.grokApiMode.value = currentAiConfig.apiMode || "openai-responses";
+  elements.grokAuthType.value = currentAiConfig.authType || "auto";
+  elements.timeoutSeconds.value = String(currentAiConfig.timeoutSeconds || 180);
+  elements.enableWebSearch.checked = currentAiConfig.enableWebSearch !== false;
+  elements.enableXSearch.checked = currentAiConfig.enableXSearch !== false;
   elements.seenCount.textContent = String(summary.totalSeen);
   elements.eventCount.textContent = String(summary.recentEvents.length);
   elements.updatedAt.textContent = summary.updatedAt ? formatClock(summary.updatedAt).slice(0, 5) : "--:--";
-  renderIntegration(integrations);
+  renderIntegration(currentAiConfig);
 }
 
 function renderIntegration(integration) {
-  currentIntegration = integration;
-  elements.bridgeStatus.textContent = integration.bridgeConfigured ? "令牌已保存" : "未配对";
-  elements.bridgeStatus.classList.toggle("ready", integration.bridgeConfigured);
-  elements.bridgeToken.placeholder = integration.bridgeConfigured
-    ? "已保存（不会回显）"
-    : "运行服务后显示的配对令牌";
-  elements.migrateLegacyConfig.hidden = !integration.grokConfigured;
+  currentAiConfig = { ...currentAiConfig, ...integration };
+  const configured = Boolean(integration.configured || integration.grokConfigured);
+  elements.analyzerStatus.textContent = configured ? "已配置" : "未配置";
+  elements.analyzerStatus.classList.toggle("ready", configured);
+  elements.grokApiKey.placeholder = configured ? "已保存（不会回显）" : "输入 API Key";
 }
 
 settingIds.forEach((id) => {
@@ -74,46 +89,75 @@ settingIds.forEach((id) => {
   });
 });
 
-document.querySelectorAll(".tab").forEach((tab) => {
-  tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab").forEach((item) => {
-      const selected = item === tab;
-      item.classList.toggle("active", selected);
-      item.setAttribute("aria-selected", String(selected));
-    });
-    document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("active", pane.id === tab.dataset.pane));
+function showPane(paneId) {
+  document.querySelectorAll(".tab").forEach((item) => {
+    const selected = item.dataset.pane === paneId;
+    item.classList.toggle("active", selected);
+    item.setAttribute("aria-selected", String(selected));
   });
+  document.querySelectorAll(".pane").forEach((pane) => pane.classList.toggle("active", pane.id === paneId));
+}
+
+document.querySelectorAll(".tab").forEach((tab) => {
+  tab.addEventListener("click", () => showPane(tab.dataset.pane));
 });
 
-elements.toggleBridgeToken.addEventListener("click", () => {
-  const reveal = elements.bridgeToken.type === "password";
-  elements.bridgeToken.type = reveal ? "text" : "password";
-  elements.toggleBridgeToken.textContent = reveal ? "●" : "◉";
+if (!chrome.windows || window.innerWidth > 400) document.body.classList.add("is-tab");
+if (location.hash === "#narrative") showPane("narrativePane");
+
+elements.openSettingsTab.addEventListener("click", () => {
+  chrome.tabs.create({ url: `${chrome.runtime.getURL("src/popup/popup.html")}#narrative` });
+});
+
+elements.toggleKey.addEventListener("click", () => {
+  const reveal = elements.grokApiKey.type === "password";
+  elements.grokApiKey.type = reveal ? "text" : "password";
+  elements.toggleKey.textContent = reveal ? "●" : "◉";
 });
 
 elements.saveAnalyzer.addEventListener("click", async () => {
-  let bridgeBaseUrl;
+  let grokBaseUrl;
+  let grokModel;
+  let apiMode;
+  let authType;
+  let timeoutSeconds;
   try {
-    bridgeBaseUrl = normalizeBridgeBaseUrl(elements.bridgeBaseUrl.value);
+    grokBaseUrl = normalizeGrokBaseUrl(elements.grokBaseUrl.value);
+    grokModel = normalizeGrokModel(elements.grokModelInput.value);
+    apiMode = normalizeGrokApiMode(elements.grokApiMode.value);
+    authType = normalizeAuthType(elements.grokAuthType.value);
+    timeoutSeconds = normalizeTimeoutSeconds(elements.timeoutSeconds.value);
   } catch (error) {
     showMessage(error.message, true);
     return;
   }
-  const token = elements.bridgeToken.value.trim();
-  if (!token && !currentIntegration?.bridgeConfigured) {
-    showMessage("请输入本地分析服务令牌", true);
+  if ((elements.enableWebSearch.checked || elements.enableXSearch.checked) && apiMode !== "openai-responses") {
+    showMessage("Grok 联网检索仅支持 OpenAI Responses 协议，请先切换协议", true);
+    return;
+  }
+  const apiKey = elements.grokApiKey.value.trim();
+  if (!apiKey && !currentAiConfig?.configured && !currentAiConfig?.grokConfigured) {
+    showMessage("请输入 API Key", true);
     return;
   }
   elements.saveAnalyzer.disabled = true;
   try {
-    const granted = await chrome.permissions.request({ origins: [permissionPatternForBridgeUrl(bridgeBaseUrl)] });
-    if (!granted) throw new Error("未获得本地分析地址访问权限");
-    await requestLocalNetworkAccess(bridgeBaseUrl);
-    const integration = await request(MESSAGE.SAVE_LOCAL_ANALYZER, { bridgeBaseUrl, bridgeToken: token });
-    currentSettings = { ...currentSettings, bridgeBaseUrl };
-    elements.bridgeToken.value = "";
+    const granted = await chrome.permissions.request({ origins: [permissionPatternForBaseUrl(grokBaseUrl)] });
+    if (!granted) throw new Error("未获得 AI 地址访问权限");
+    const integration = await request(MESSAGE.SAVE_AI_CONFIG, {
+      grokBaseUrl,
+      grokModel,
+      apiMode,
+      authType,
+      timeoutSeconds,
+      enableWebSearch: elements.enableWebSearch.checked,
+      enableXSearch: elements.enableXSearch.checked,
+      apiKey,
+    });
+    elements.grokApiKey.value = "";
+    elements.grokApiKey.type = "password";
     renderIntegration(integration);
-    showMessage("本地分析连接已保存");
+    showMessage("AI 配置已保存");
   } catch (error) {
     showMessage(error.message, true);
   } finally {
@@ -122,15 +166,52 @@ elements.saveAnalyzer.addEventListener("click", async () => {
 });
 
 elements.testAnalyzer.addEventListener("click", async () => {
-  showMessage("正在测试本地分析服务…");
+  let grokBaseUrl;
+  let grokModel;
+  let apiMode;
+  let authType;
+  let timeoutSeconds;
   try {
-    await requestLocalNetworkAccess(currentSettings.bridgeBaseUrl);
-    const integration = await request(MESSAGE.TEST_GROK_API);
+    grokBaseUrl = normalizeGrokBaseUrl(elements.grokBaseUrl.value);
+    grokModel = normalizeGrokModel(elements.grokModelInput.value);
+    apiMode = normalizeGrokApiMode(elements.grokApiMode.value);
+    authType = normalizeAuthType(elements.grokAuthType.value);
+    timeoutSeconds = normalizeTimeoutSeconds(elements.timeoutSeconds.value);
+  } catch (error) {
+    showMessage(error.message, true);
+    return;
+  }
+  if ((elements.enableWebSearch.checked || elements.enableXSearch.checked) && apiMode !== "openai-responses") {
+    showMessage("Grok 联网检索仅支持 OpenAI Responses 协议，请先切换协议", true);
+    return;
+  }
+  const apiKey = elements.grokApiKey.value.trim();
+  if (!apiKey && !currentAiConfig?.configured && !currentAiConfig?.grokConfigured) {
+    showMessage("请输入 API Key", true);
+    return;
+  }
+  showMessage((elements.enableWebSearch.checked || elements.enableXSearch.checked)
+    ? "正在测试 AI 连接（含检索，可能需要一两分钟）…"
+    : "正在测试 AI 连接…");
+  try {
+    const granted = await chrome.permissions.request({ origins: [permissionPatternForBaseUrl(grokBaseUrl)] });
+    if (!granted) throw new Error("未获得 AI 地址访问权限");
+    const integration = await request(MESSAGE.TEST_GROK_API, {
+      grokBaseUrl,
+      grokModel,
+      apiMode,
+      authType,
+      timeoutSeconds,
+      enableWebSearch: elements.enableWebSearch.checked,
+      enableXSearch: elements.enableXSearch.checked,
+      apiKey,
+    });
     renderIntegration(integration);
-    const configured = integration.analyzer?.configured;
-    elements.analyzerStatus.textContent = configured ? "可用" : "待配置 API";
-    elements.analyzerStatus.classList.toggle("ready", configured);
-    showMessage(configured ? "本地分析服务连接正常" : "服务已连接，请打开本地 AI 设置填写 API Key", !configured);
+    const search = integration.testSearch;
+    const savedHint = integration.configured ? "" : "（尚未保存，请点击保存配置）";
+    showMessage(search
+      ? `AI 连接正常：Web ${search.webCalls} 次／X ${search.xCalls} 次${savedHint}`
+      : `AI 连接正常${savedHint}`);
   } catch (error) {
     elements.analyzerStatus.textContent = "连接失败";
     elements.analyzerStatus.classList.remove("ready");
@@ -138,54 +219,70 @@ elements.testAnalyzer.addEventListener("click", async () => {
   }
 });
 
-elements.openAnalyzerSettings.addEventListener("click", () => {
-  const baseUrl = normalizeBridgeBaseUrl(elements.bridgeBaseUrl.value || currentSettings.bridgeBaseUrl);
-  chrome.tabs.create({ url: `${baseUrl}/` });
-});
+function setNarrativeActionsDisabled(disabled) {
+  elements.manualTopNarrative.disabled = disabled;
+  elements.manualCaNarrative.disabled = disabled;
+  elements.manualCaAddress.disabled = disabled;
+}
 
-elements.migrateLegacyConfig.addEventListener("click", async () => {
-  elements.migrateLegacyConfig.disabled = true;
-  showMessage("正在将旧 API 配置迁移到本地服务…");
+async function readCurrentPageTopToken() {
+  const tabs = await chrome.tabs.query({ url: "https://gmgn.ai/trend*" });
+  const tab = tabs.find((item) => item.active) || tabs[0];
+  if (!tab?.id) throw new Error("请先打开 GMGN 热门榜页面");
+  let topTokenResponse;
   try {
-    await requestLocalNetworkAccess(currentSettings.bridgeBaseUrl);
-    const integration = await request(MESSAGE.MIGRATE_LEGACY_AI_CONFIG);
-    renderIntegration(integration);
-    elements.analyzerStatus.textContent = "可用";
-    elements.analyzerStatus.classList.add("ready");
-    showMessage("迁移完成，API Key 已从插件中移除");
+    topTokenResponse = await chrome.tabs.sendMessage(tab.id, {
+      target: MESSAGE_TARGET.CONTENT,
+      type: MESSAGE.GET_CURRENT_TOP_TOKEN,
+    });
   } catch (error) {
-    showMessage(error.message, true);
-  } finally {
-    elements.migrateLegacyConfig.disabled = false;
+    const disconnected = /Receiving end does not exist|Extension context invalidated/i.test(error?.message || "");
+    throw new Error(disconnected ? "GMGN 页面仍在使用旧插件，请刷新该页面后重试" : error.message);
   }
-});
+  if (!topTokenResponse?.ok) throw new Error(topTokenResponse?.error || "无法读取当前榜首");
+  return topTokenResponse.token;
+}
 
 elements.manualTopNarrative.addEventListener("click", async () => {
-  elements.manualTopNarrative.disabled = true;
+  setNarrativeActionsDisabled(true);
   showMessage("正在读取 GMGN 当前榜首…");
   try {
-    await requestLocalNetworkAccess(currentSettings.bridgeBaseUrl);
-    const tabs = await chrome.tabs.query({ url: "https://gmgn.ai/trend*" });
-    const tab = tabs.find((item) => item.active) || tabs[0];
-    if (!tab?.id) throw new Error("请先打开 GMGN 热门榜页面");
-    let topTokenResponse;
-    try {
-      topTokenResponse = await chrome.tabs.sendMessage(tab.id, {
-        target: MESSAGE_TARGET.CONTENT,
-        type: MESSAGE.GET_CURRENT_TOP_TOKEN,
-      });
-    } catch (error) {
-      const disconnected = /Receiving end does not exist|Extension context invalidated/i.test(error?.message || "");
-      throw new Error(disconnected ? "GMGN 页面仍在使用旧插件，请刷新该页面后重试" : error.message);
-    }
-    if (!topTokenResponse?.ok) throw new Error(topTokenResponse?.error || "无法读取当前榜首");
-    await request(MESSAGE.MANUAL_NARRATIVE, { token: topTokenResponse.token });
-    showMessage(`已发送 ${topTokenResponse.token.symbol || "榜首代币"}，结果将在 GMGN 面板显示`);
+    const token = await readCurrentPageTopToken();
+    await request(MESSAGE.MANUAL_NARRATIVE, { token });
+    showMessage(`已发送 ${token.symbol || "榜首代币"}，结果将在 GMGN 面板显示`);
   } catch (error) {
     showMessage(error.message || "手动分析失败", true);
   } finally {
-    elements.manualTopNarrative.disabled = false;
+    setNarrativeActionsDisabled(false);
   }
+});
+
+elements.manualCaNarrative.addEventListener("click", async () => {
+  let address;
+  try {
+    address = parseManualContractAddress(elements.manualCaAddress.value);
+  } catch (error) {
+    showMessage(error.message, true);
+    return;
+  }
+  setNarrativeActionsDisabled(true);
+  showMessage("正在读取当前页面链信息…");
+  try {
+    const pageToken = await readCurrentPageTopToken();
+    const token = buildMinimalCaToken(pageToken?.chain, address);
+    await request(MESSAGE.MANUAL_NARRATIVE, { token });
+    showMessage(`已发送 ${token.symbol || "该合约"}，结果将在 GMGN 面板显示`);
+  } catch (error) {
+    showMessage(error.message || "手动分析失败", true);
+  } finally {
+    setNarrativeActionsDisabled(false);
+  }
+});
+
+elements.manualCaAddress.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  elements.manualCaNarrative.click();
 });
 
 elements.testSound.addEventListener("click", async () => {
@@ -198,13 +295,5 @@ elements.testSound.addEventListener("click", async () => {
 });
 
 elements.openGmgn.addEventListener("click", () => chrome.tabs.create({ url: GMGN_URL }));
-
-async function requestLocalNetworkAccess(baseUrl) {
-  try {
-    await fetch(`${normalizeBridgeBaseUrl(baseUrl)}/health`, { cache: "no-store" });
-  } catch (_) {
-    throw new Error("Chrome 未允许插件访问本地分析服务");
-  }
-}
 
 request(MESSAGE.GET_BOOTSTRAP).then(render).catch((error) => showMessage(error.message, true));

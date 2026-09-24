@@ -1,7 +1,6 @@
 const DATABASE_NAME = "gmgn-monitor-secrets";
 const STORE_NAME = "secrets";
 const GROK_KEY_ID = "grokApiKey";
-const BRIDGE_TOKEN_ID = "bridgeToken";
 
 export class SecretVault {
   constructor(indexedDb = indexedDB) {
@@ -24,36 +23,12 @@ export class SecretVault {
     return this.database;
   }
 
-  async saveGrokApiKey(apiKey) {
-    await this.put(GROK_KEY_ID, String(apiKey || "").trim());
-  }
-
   getGrokApiKey() {
     return this.get(GROK_KEY_ID);
   }
 
   clearGrokApiKey() {
     return this.remove(GROK_KEY_ID);
-  }
-
-  async isGrokConfigured() {
-    return Boolean(await this.getGrokApiKey());
-  }
-
-  async saveBridgeToken(token) {
-    await this.put(BRIDGE_TOKEN_ID, String(token || "").trim());
-  }
-
-  getBridgeToken() {
-    return this.get(BRIDGE_TOKEN_ID);
-  }
-
-  clearBridgeToken() {
-    return this.remove(BRIDGE_TOKEN_ID);
-  }
-
-  async isBridgeConfigured() {
-    return Boolean(await this.getBridgeToken());
   }
 
   async get(key) {
@@ -63,11 +38,6 @@ export class SecretVault {
       request.onsuccess = () => resolve(request.result || "");
       request.onerror = () => reject(request.error);
     });
-  }
-
-  async put(key, value) {
-    const database = await this.open();
-    return this.transaction(database, "readwrite", (store) => store.put(value, key));
   }
 
   async remove(key) {

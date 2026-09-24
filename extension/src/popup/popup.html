@@ -36,18 +36,30 @@
     </main>
 
     <section class="pane narrative-pane" id="narrativePane">
-      <div class="integration-head"><div><b>本地分析服务</b><small>AI 配置与插件分离</small></div><span class="api-status" id="analyzerStatus">未连接</span></div>
+      <div class="integration-head"><div><b>Grok API</b><small>和 chanlun-ai 一样，插件直接请求你填写的 AI 地址</small></div><span class="api-status" id="analyzerStatus">未配置</span></div>
+      <button id="openSettingsTab" class="open-tab" type="button">在独立页面填写（不会自动关掉）</button>
       <label class="setting"><span><b>自动叙事分析</b><small>仅分析触发提醒的代币</small></span><input id="narrativeEnabled" type="checkbox" role="switch"></label>
-      <div class="bridge-section">
-        <div class="section-title"><label for="bridgeBaseUrl">本地分析地址</label><span class="api-status" id="bridgeStatus">未配对</span></div>
-        <input id="bridgeBaseUrl" type="url" placeholder="http://127.0.0.1:18761" autocomplete="off" spellcheck="false">
-        <div class="key-row"><input id="bridgeToken" type="password" placeholder="运行服务后显示的配对令牌" autocomplete="off" spellcheck="false"><button id="toggleBridgeToken" type="button" title="显示或隐藏配对令牌">◉</button></div>
-        <p>插件只发送公开代币数据，本地服务独立调用并解析 AI。</p>
+      <label class="setting"><span><b>Web 搜索</b><small>检索公开网页资料</small></span><input id="enableWebSearch" type="checkbox" role="switch"></label>
+      <label class="setting"><span><b>X 搜索</b><small>检索带原帖链接的讨论</small></span><input id="enableXSearch" type="checkbox" role="switch"></label>
+      <div class="config-fields">
+        <label><span>接口地址</span><input id="grokBaseUrl" type="url" value="http://192.119.105.12:9434/v1" placeholder="http://192.119.105.12:9434/v1" autocomplete="off" spellcheck="false"></label>
+        <label><span>模型名称</span><input id="grokModelInput" type="text" placeholder="grok-4.6" autocomplete="off" spellcheck="false"></label>
+        <label><span>协议</span><select id="grokApiMode"><option value="openai-responses">OpenAI Responses</option><option value="openai-chat">OpenAI Chat Completions</option></select></label>
+        <label><span>鉴权</span><select id="grokAuthType"><option value="auto">自动</option><option value="bearer">Authorization: Bearer</option><option value="x-api-key">x-api-key</option></select></label>
+        <label><span>超时时间（秒）</span><input id="timeoutSeconds" type="number" min="15" max="300" step="5"></label>
       </div>
-      <div class="local-actions"><button id="saveAnalyzer" class="primary" type="button">保存连接</button><button id="testAnalyzer" class="secondary text" type="button">测试服务</button></div>
-      <button id="openAnalyzerSettings" class="secondary wide" type="button">打开本地 AI 设置</button>
-      <button id="migrateLegacyConfig" class="migration-action" type="button">迁移插件中的旧 API 配置</button>
+      <div class="key-section">
+        <label for="grokApiKey">API Key</label>
+        <div class="key-row"><input id="grokApiKey" type="password" placeholder="已保存时留空即可" autocomplete="off" spellcheck="false"><button id="toggleKey" type="button" title="显示或隐藏 API Key">◉</button></div>
+        <p>密钥保存在扩展本地存储中，不会写入监控导出、错误提示或用量记录。同一主机可留空沿用旧 Key；更换接口地址后必须重新输入。</p>
+      </div>
+      <div class="local-actions"><button id="saveAnalyzer" class="primary" type="button">保存配置</button><button id="testAnalyzer" class="secondary text" type="button">测试连接</button></div>
       <button id="manualTopNarrative" class="manual-action" type="button">手动分析当前榜首</button>
+      <div class="ca-action">
+        <label for="manualCaAddress">分析指定 CA</label>
+        <input id="manualCaAddress" type="text" placeholder="合约地址，沿用当前热门榜页面的链" autocomplete="off" spellcheck="false">
+        <button id="manualCaNarrative" class="manual-action" type="button">分析该 CA</button>
+      </div>
     </section>
   </div>
 

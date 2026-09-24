@@ -84,6 +84,7 @@ export class ExtensionGateway {
       listener(changes[STORAGE_KEYS.INTEGRATIONS].newValue || {
         grokConfigured: false,
         grokModel: GROK.MODEL,
+        grokBaseUrl: GROK.API_BASE_URL,
       });
     };
     chrome.storage.onChanged.addListener(handler);

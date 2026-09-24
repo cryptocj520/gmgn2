@@ -1,11 +1,5 @@
-import { DATA_SCHEMA_VERSION, DEFAULT_SETTINGS, LIMITS, STORAGE_KEYS } from "../shared/constants.js";
+import { DATA_SCHEMA_VERSION, DEFAULT_SETTINGS, GROK, LIMITS, STORAGE_KEYS } from "../shared/constants.js";
 import { applyScanToState, createDataState } from "../shared/scan-state.js";
-import {
-  normalizeBridgeBaseUrl,
-  normalizeGrokApiMode,
-  normalizeGrokBaseUrl,
-  normalizeGrokModel,
-} from "../shared/grok-config.js";
 import { normalizePanelPosition, normalizePanelSize } from "../shared/panel-preferences.js";
 
 export class DataRepository {
@@ -15,10 +9,8 @@ export class DataRepository {
     this.settings = { ...DEFAULT_SETTINGS };
     this.integrations = {
       grokConfigured: false,
-      grokModel: DEFAULT_SETTINGS.grokModel,
-      grokBaseUrl: DEFAULT_SETTINGS.grokBaseUrl,
-      bridgeConfigured: false,
-      bridgeBaseUrl: DEFAULT_SETTINGS.bridgeBaseUrl,
+      grokModel: GROK.MODEL,
+      grokBaseUrl: GROK.API_BASE_URL,
     };
     this.requiresBaseline = true;
     this.ready = null;
@@ -47,26 +39,13 @@ export class DataRepository {
       events: storedData?.events || [],
       narrativeJobs: storedData?.narrativeJobs || {},
     };
-    this.settings = { ...DEFAULT_SETTINGS, ...(stored[STORAGE_KEYS.SETTINGS] || {}) };
-    try {
-      this.settings.grokBaseUrl = normalizeGrokBaseUrl(this.settings.grokBaseUrl);
-      this.settings.grokModel = normalizeGrokModel(this.settings.grokModel);
-      this.settings.grokApiMode = normalizeGrokApiMode(this.settings.grokApiMode);
-      this.settings.bridgeBaseUrl = normalizeBridgeBaseUrl(this.settings.bridgeBaseUrl);
-    } catch (_) {
-      this.settings.grokBaseUrl = DEFAULT_SETTINGS.grokBaseUrl;
-      this.settings.grokModel = DEFAULT_SETTINGS.grokModel;
-      this.settings.grokApiMode = DEFAULT_SETTINGS.grokApiMode;
-      this.settings.bridgeBaseUrl = DEFAULT_SETTINGS.bridgeBaseUrl;
-    }
+    this.settings = pickMonitorSettings(stored[STORAGE_KEYS.SETTINGS] || {});
     this.settings.panelSize = normalizePanelSize(this.settings.panelSize);
     this.settings.panelPosition = normalizePanelPosition(this.settings.panelPosition);
     this.integrations = {
       grokConfigured: Boolean(stored[STORAGE_KEYS.INTEGRATIONS]?.grokConfigured),
-      grokModel: this.settings.grokModel,
-      grokBaseUrl: this.settings.grokBaseUrl,
-      bridgeConfigured: Boolean(stored[STORAGE_KEYS.INTEGRATIONS]?.bridgeConfigured),
-      bridgeBaseUrl: this.settings.bridgeBaseUrl,
+      grokModel: stored[STORAGE_KEYS.INTEGRATIONS]?.grokModel || GROK.MODEL,
+      grokBaseUrl: stored[STORAGE_KEYS.INTEGRATIONS]?.grokBaseUrl || GROK.API_BASE_URL,
     };
   }
 
@@ -129,18 +108,6 @@ export class DataRepository {
         Math.max(LIMITS.MIN_ALERT_TOP_N, Number.isFinite(rank) ? rank : DEFAULT_SETTINGS.alertTopN),
       );
     }
-    if (Object.hasOwn(allowed, "grokBaseUrl")) {
-      allowed.grokBaseUrl = normalizeGrokBaseUrl(allowed.grokBaseUrl);
-    }
-    if (Object.hasOwn(allowed, "grokModel")) {
-      allowed.grokModel = normalizeGrokModel(allowed.grokModel);
-    }
-    if (Object.hasOwn(allowed, "grokApiMode")) {
-      allowed.grokApiMode = normalizeGrokApiMode(allowed.grokApiMode);
-    }
-    if (Object.hasOwn(allowed, "bridgeBaseUrl")) {
-      allowed.bridgeBaseUrl = normalizeBridgeBaseUrl(allowed.bridgeBaseUrl);
-    }
     if (Object.hasOwn(allowed, "panelSize")) {
       allowed.panelSize = normalizePanelSize(allowed.panelSize);
     }
@@ -148,12 +115,6 @@ export class DataRepository {
       allowed.panelPosition = normalizePanelPosition(allowed.panelPosition);
     }
     this.settings = { ...this.settings, ...allowed };
-    this.integrations = {
-      ...this.integrations,
-      grokModel: this.settings.grokModel,
-      grokBaseUrl: this.settings.grokBaseUrl,
-      bridgeBaseUrl: this.settings.bridgeBaseUrl,
-    };
     await this.storage.set({
       [STORAGE_KEYS.SETTINGS]: this.settings,
       [STORAGE_KEYS.INTEGRATIONS]: this.integrations,
@@ -169,16 +130,13 @@ export class DataRepository {
     return this.getSummary();
   }
 
-  async setGrokConfigured(configured) {
+  async setGrokConfigured(configured, extras = {}) {
     await this.initialize();
-    this.integrations = { ...this.integrations, grokConfigured: Boolean(configured) };
-    await this.storage.set({ [STORAGE_KEYS.INTEGRATIONS]: this.integrations });
-    return { ...this.integrations };
-  }
-
-  async setBridgeConfigured(configured) {
-    await this.initialize();
-    this.integrations = { ...this.integrations, bridgeConfigured: Boolean(configured) };
+    this.integrations = {
+      grokConfigured: Boolean(configured),
+      grokModel: extras.grokModel || this.integrations.grokModel || GROK.MODEL,
+      grokBaseUrl: extras.grokBaseUrl || this.integrations.grokBaseUrl || GROK.API_BASE_URL,
+    };
     await this.storage.set({ [STORAGE_KEYS.INTEGRATIONS]: this.integrations });
     return { ...this.integrations };
   }
@@ -338,6 +296,22 @@ export class DataRepository {
     });
   }
 
+  async parkNarrativeJob(jobId) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const job = this.data.narrativeJobs[jobId];
+      if (!job) return this.getSummary();
+      const events = this.updateEventNarrative(job, {
+        status: "waiting_key",
+        updatedAt: Date.now(),
+      });
+      const narrativeJobs = { ...this.data.narrativeJobs };
+      delete narrativeJobs[jobId];
+      this.data = { ...this.data, events, narrativeJobs, updatedAt: Date.now() };
+      return this.getSummary();
+    });
+  }
+
   async failNarrativeJob(jobId, errorMessage) {
     await this.initialize();
     return this.runDataWrite(() => {
@@ -359,10 +333,13 @@ export class DataRepository {
     await this.initialize();
     return this.runDataWrite(() => {
       const pendingIds = new Set(Object.values(this.data.narrativeJobs).map((job) => job.token.id));
-      const events = this.data.events.map((event) => pendingIds.has(event.id)
-        ? { ...event, narrative: { status: "cancelled", error: reason, updatedAt: Date.now() } }
-        : event
-      );
+      const events = this.data.events.map((event) => {
+        const queued = pendingIds.has(event.id);
+        const waiting = event.narrative?.status === "waiting_key";
+        return queued || waiting
+          ? { ...event, narrative: { status: "cancelled", error: reason, updatedAt: Date.now() } }
+          : event;
+      });
       this.data = { ...this.data, events, narrativeJobs: {}, updatedAt: Date.now() };
       return this.getSummary();
     });
@@ -391,7 +368,7 @@ export class DataRepository {
     return {
       exportedAt: new Date().toISOString(),
       schemaVersion: this.data.schemaVersion,
-      settings: { ...this.settings },
+      settings: pickMonitorSettings(this.settings),
       tokens: Object.values(this.data.tokens),
       events: [...this.data.events],
     };
@@ -409,4 +386,11 @@ export class DataRepository {
   getIntegrationStatus() {
     return { ...this.integrations };
   }
+}
+
+function pickMonitorSettings(value = {}) {
+  return Object.keys(DEFAULT_SETTINGS).reduce((next, key) => {
+    next[key] = Object.hasOwn(value, key) ? value[key] : DEFAULT_SETTINGS[key];
+    return next;
+  }, {});
 }
