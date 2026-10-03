@@ -214,6 +214,14 @@ export class MonitorEngine {
     return this.gateway.ensureFomoPermission();
   }
 
+  toggleFomoLive(tokenId, detectedAt, live) {
+    return this.gateway.toggleFomoLive(tokenId, detectedAt, live);
+  }
+
+  refreshFomoOnce(tokenId, detectedAt) {
+    return this.gateway.refreshFomoOnce(tokenId, detectedAt);
+  }
+
   async analyzeTopToken() {
     const token = await this.getCurrentTopToken();
     const result = await this.gateway.manualNarrative(token);

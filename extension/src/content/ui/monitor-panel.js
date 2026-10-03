@@ -68,7 +68,7 @@ export class MonitorPanel {
           ${this.toggleSetting("desktopToggle", "桌面通知", "声音以外再显示系统通知")}
           ${this.toggleSetting("autoRefreshToggle", "连接超时自动刷新", "读取 GMGN 底部连接状态")}
           ${this.toggleSetting("narrativeToggle", "自动叙事分析", "报警后调用 Grok 分析")}
-          ${this.toggleSetting("fomoToggle", "启用 FOMO 占比", "收款钱包样本，非持仓；首次请在扩展弹窗授权节点")}
+          ${this.toggleSetting("fomoToggle", "启用 FOMO 占比", "新提醒算一次；刷新/跟随在卡片上")}
           <div class="setting-row"><div class="setting-main"><div class="setting-name">Grok API</div><div class="setting-note">在扩展弹窗中配置接口和密钥</div></div><span class="api-state" id="narrativeApiState">未配置</span></div>
           <button class="action-button manual-analysis" id="manualNarrativeButton" type="button">手动分析当前榜首</button>
           <div class="ca-action">
@@ -220,6 +220,57 @@ export class MonitorPanel {
     this.showToast("已启用 FOMO 占比");
   }
 
+  createFomoRow(event) {
+    const row = document.createElement("span");
+    row.className = "event-fomo-row";
+    const label = document.createElement("span");
+    label.className = `event-fomo fomo-${event.fomo?.status || "unavailable"}`;
+    if (event.fomo?.live) label.classList.add("fomo-live");
+    label.textContent = event.fomo?.label || "FOMO 未查询";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "fomo-action";
+    refresh.textContent = "刷新";
+    refresh.title = "只查这一枚一次";
+    refresh.addEventListener("click", (clickEvent) => {
+      clickEvent.preventDefault();
+      clickEvent.stopPropagation();
+      this.refreshFomoOnce(event);
+    });
+    const follow = document.createElement("button");
+    follow.type = "button";
+    follow.className = "fomo-action";
+    if (event.fomo?.live) follow.classList.add("is-on");
+    follow.textContent = event.fomo?.live ? "跟随中" : "跟随";
+    follow.title = event.fomo?.live ? "停止跟着刷" : "约 3 分钟刷新这一枚";
+    follow.addEventListener("click", (clickEvent) => {
+      clickEvent.preventDefault();
+      clickEvent.stopPropagation();
+      this.toggleFomoLive(event);
+    });
+    row.append(label, refresh, follow);
+    return row;
+  }
+
+  async refreshFomoOnce(event) {
+    try {
+      await this.engine.refreshFomoOnce(event.id, event.detectedAt);
+      this.showToast("正在刷新这一枚 FOMO 占比");
+    } catch (error) {
+      this.showToast(error.message, true);
+    }
+  }
+
+  async toggleFomoLive(event) {
+    const live = !event.fomo?.live;
+    try {
+      await this.engine.toggleFomoLive(event.id, event.detectedAt, live);
+      this.showToast(live ? "已开启这一枚跟随" : "已停止这一枚跟随");
+    } catch (error) {
+      this.showToast(error.message, true);
+    }
+  }
+
   bindSetting(elementId, key) {
     this.elements[elementId].addEventListener("change", () => {
       this.engine.updateSettings({ [key]: this.elements[elementId].checked })
@@ -320,11 +371,8 @@ export class MonitorPanel {
     chain.textContent = event.manual ? `${event.chain} · 手动` : event.chain;
     nameLine.append(symbol, chain);
     main.append(nameLine);
-    if (event.fomo?.label) {
-      const fomoLine = document.createElement("span");
-      fomoLine.className = `event-fomo fomo-${event.fomo.status || "running"}`;
-      fomoLine.textContent = event.fomo.label;
-      main.append(fomoLine);
+    if (String(event.chain || "").toLowerCase() === "robinhood") {
+      main.append(this.createFomoRow(event));
     }
     const meta = document.createElement("span");
     meta.className = "event-meta";

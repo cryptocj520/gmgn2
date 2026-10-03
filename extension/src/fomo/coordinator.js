@@ -41,20 +41,29 @@ export class FomoCoordinator {
     const events = await this.repository.listEvents();
     if (generation !== this.generation) return;
     const now = Date.now();
-    const due = [];
+    const liveDue = [];
+    const stuckDue = [];
     const seen = new Set();
     for (const event of events) {
       if (!isRobinhoodToken(event) || event.manual || !event.address) continue;
       const key = `${event.id}:${event.detectedAt}`;
       if (seen.has(key)) continue;
+      seen.add(key);
       const status = event.fomo?.status;
       const updatedAt = Number(event.fomo?.updatedAt) || 0;
-      const missing = !event.fomo;
-      const stuck = status === FOMO_STATUS.RUNNING && now - updatedAt > 45_000;
-      if (!missing && !stuck) continue;
-      seen.add(key);
-      due.push(event);
-      if (due.length >= 5) break;
+      if (event.fomo?.live && status !== FOMO_STATUS.RUNNING && now - updatedAt >= FOMO.LIVE_REFRESH_MS) liveDue.push(event);
+      else if (event.fomo?.live && status === FOMO_STATUS.RUNNING && now - updatedAt > 45_000) stuckDue.push(event);
+      else if (!event.fomo?.live && status === FOMO_STATUS.RUNNING && now - updatedAt > 45_000) stuckDue.push({ ...event, _orphan: true });
+      if (liveDue.length + stuckDue.length >= 8) break;
+    }
+    const orphans = stuckDue.filter((event) => event._orphan);
+    const due = [...liveDue, ...stuckDue.filter((event) => !event._orphan)].slice(0, 5);
+    if (orphans.length) {
+      await this.write(orphans, {
+        status: FOMO_STATUS.UNAVAILABLE,
+        label: "FOMO 检测中断",
+        detail: "未跟随的批量检测已停止，需要时请点刷新。",
+      });
     }
     if (!due.length) return;
     await this.write(due, { status: FOMO_STATUS.RUNNING, label: "FOMO 占比检测中…" });
@@ -85,7 +94,16 @@ export class FomoCoordinator {
       return;
     }
     if (!this.isCurrent(generation)) return;
-    this.enqueue(pending, generation);
+    const live = pending.filter((event) => event.fomo?.live);
+    const rest = pending.filter((event) => !event.fomo?.live);
+    if (rest.length) {
+      await this.write(rest, {
+        status: FOMO_STATUS.UNAVAILABLE,
+        label: "FOMO 检测中断",
+        detail: "未跟随的批量检测已停止，需要时请点刷新。",
+      });
+    }
+    if (live.length) this.enqueue(live, generation);
   }
 
   async cancelPending() {
@@ -133,7 +151,64 @@ export class FomoCoordinator {
     }
   }
 
-  write(tokens, fomo) {
-    return this.repository.patchEvents(tokens, { fomo: { ...fomo, updatedAt: Date.now() } });
+  async refreshOnce(tokenId, detectedAt) {
+    await this.repository.initialize();
+    if (!this.repository.settings.fomoEnabled) throw new Error("请先打开 FOMO 占比开关");
+    const event = (await this.repository.listEvents())
+      .find((item) => item.id === tokenId && item.detectedAt === detectedAt);
+    if (!event || !isRobinhoodToken(event)) throw new Error("找不到这条 Robinhood 提醒");
+    await this.write([event], {
+      ...(event.fomo || {}),
+      status: FOMO_STATUS.RUNNING,
+      label: "FOMO 占比检测中…",
+    });
+    this.enqueue([event], this.generation);
+    return { status: FOMO_STATUS.RUNNING, label: "FOMO 占比检测中…" };
+  }
+
+  async toggleLive(tokenId, detectedAt, live) {
+    await this.repository.initialize();
+    if (!this.repository.settings.fomoEnabled) throw new Error("请先打开 FOMO 占比开关");
+    const event = (await this.repository.listEvents())
+      .find((item) => item.id === tokenId && item.detectedAt === detectedAt);
+    if (!event || !isRobinhoodToken(event)) throw new Error("找不到这条 Robinhood 提醒");
+    const enabled = Boolean(live);
+    if (enabled) {
+      await this.write([event], {
+        ...(event.fomo || {}),
+        live: true,
+        status: FOMO_STATUS.RUNNING,
+        label: "FOMO 占比检测中…",
+      });
+      this.enqueue([event], this.generation);
+    } else {
+      await this.write([event], { ...(event.fomo || {}), live: false });
+    }
+    const latest = (await this.repository.listEvents())
+      .find((item) => item.id === tokenId && item.detectedAt === detectedAt);
+    return latest?.fomo || null;
+  }
+
+  async write(tokens, fomo) {
+    const events = await this.repository.listEvents();
+    const byKey = new Map(events.map((event) => [`${event.id}:${event.detectedAt}`, event]));
+    for (const token of tokens) {
+      const previous = byKey.get(`${token.id}:${token.detectedAt}`)?.fomo || {};
+      const live = typeof fomo.live === "boolean" ? fomo.live : Boolean(previous.live);
+      let label = fomo.label || previous.label || "";
+      if (live && (fomo.status || previous.status) === FOMO_STATUS.READY) {
+        label = `${String(label).replace(/ · 跟着刷$/, "")} · 跟着刷`;
+      }
+      if (!live) label = String(label).replace(/ · 跟着刷$/, "");
+      await this.repository.patchEvents([token], {
+        fomo: {
+          ...previous,
+          ...fomo,
+          live,
+          label,
+          updatedAt: Date.now(),
+        },
+      });
+    }
   }
 }

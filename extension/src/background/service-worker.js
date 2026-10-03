@@ -79,6 +79,8 @@ const handlers = {
   [MESSAGE.MANUAL_NARRATIVE]: (message) => narratives.queueManual(message.token),
   [MESSAGE.SAVE_AI_CONFIG]: (message) => narratives.saveAiConfig(message),
   [MESSAGE.FOMO_ENSURE_PERMISSION]: () => fomo.ensurePermission({ openSettings: true }),
+  [MESSAGE.FOMO_TOGGLE_LIVE]: (message) => fomo.toggleLive(message.tokenId, message.detectedAt, message.live),
+  [MESSAGE.FOMO_REFRESH_ONCE]: (message) => fomo.refreshOnce(message.tokenId, message.detectedAt),
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

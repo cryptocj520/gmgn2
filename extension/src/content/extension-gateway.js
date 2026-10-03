@@ -59,6 +59,14 @@ export class ExtensionGateway {
     return this.request(MESSAGE.FOMO_ENSURE_PERMISSION);
   }
 
+  toggleFomoLive(tokenId, detectedAt, live) {
+    return this.request(MESSAGE.FOMO_TOGGLE_LIVE, { tokenId, detectedAt, live });
+  }
+
+  refreshFomoOnce(tokenId, detectedAt) {
+    return this.request(MESSAGE.FOMO_REFRESH_ONCE, { tokenId, detectedAt });
+  }
+
   onSettingsChanged(listener) {
     const handler = (changes, areaName) => {
       const change = changes[STORAGE_KEYS.SETTINGS];
