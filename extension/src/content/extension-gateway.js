@@ -55,6 +55,10 @@ export class ExtensionGateway {
     return this.request(MESSAGE.MANUAL_NARRATIVE, { token });
   }
 
+  ensureFomoPermission() {
+    return this.request(MESSAGE.FOMO_ENSURE_PERMISSION);
+  }
+
   onSettingsChanged(listener) {
     const handler = (changes, areaName) => {
       const change = changes[STORAGE_KEYS.SETTINGS];

@@ -127,6 +127,10 @@ export const PANEL_STYLES = `
   .event-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   .symbol { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; color: #fff; }
   .chain { color: #9da797; font-size: 10px; text-transform: uppercase; }
+  .event-fomo { display: block; margin-top: 3px; font-size: 11px; color: #8f998c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .event-fomo.fomo-ready { color: #c9f26b; }
+  .event-fomo.fomo-running { color: #eabf65; }
+  .event-fomo.fomo-unavailable { color: #8f998c; }
   .event-meta { display: block; margin-top: 4px; color: #828b7f; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .event-meta.narrative-ready { color: #c9f26b; }
   .event-meta.narrative-queued, .event-meta.narrative-processing, .event-meta.narrative-retrying { color: #eabf65; }

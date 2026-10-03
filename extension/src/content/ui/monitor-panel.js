@@ -61,13 +61,14 @@ export class MonitorPanel {
           <div class="stat"><span class="stat-value" id="scanValue">--:--</span><span class="stat-label">最近扫描</span></div>
         </div>
         <div class="content"><div class="section-head"><span class="section-title">提醒记录</span><span class="section-count" id="eventCount">0 条</span></div><div class="events" id="events"></div></div>
-        <footer class="footer"><span class="footer-state"></span><span>首次进入提醒名次 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.14.0</span></footer>
+        <footer class="footer"><span class="footer-state"></span><span>首次进入提醒名次 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.16.0</span></footer>
         <aside class="settings" id="settingsPanel">
           <h2 class="settings-title">监控设置</h2>
           ${this.toggleSetting("autoStartToggle", "打开页面自动监控", "首次榜单仍会静默建立基线")}
           ${this.toggleSetting("desktopToggle", "桌面通知", "声音以外再显示系统通知")}
           ${this.toggleSetting("autoRefreshToggle", "连接超时自动刷新", "读取 GMGN 底部连接状态")}
           ${this.toggleSetting("narrativeToggle", "自动叙事分析", "报警后调用 Grok 分析")}
+          ${this.toggleSetting("fomoToggle", "启用 FOMO 占比", "收款钱包样本，非持仓；首次请在扩展弹窗授权节点")}
           <div class="setting-row"><div class="setting-main"><div class="setting-name">Grok API</div><div class="setting-note">在扩展弹窗中配置接口和密钥</div></div><span class="api-state" id="narrativeApiState">未配置</span></div>
           <button class="action-button manual-analysis" id="manualNarrativeButton" type="button">手动分析当前榜首</button>
           <div class="ca-action">
@@ -111,7 +112,7 @@ export class MonitorPanel {
       "launcher", "launcherBadge", "panel", "panelHeader", "statusDot", "statusText", "settingsButton",
       "shrinkPanelButton", "growPanelButton", "collapseButton", "settingsPanel", "startButton", "startIcon", "startLabel", "soundToggle",
       "testSoundButton", "seenValue", "currentValue", "newValue", "scanValue", "eventCount",
-      "events", "autoStartToggle", "desktopToggle", "autoRefreshToggle", "narrativeToggle", "intervalSelect",
+      "events", "autoStartToggle", "desktopToggle", "autoRefreshToggle", "narrativeToggle", "fomoToggle", "intervalSelect",
       "connectionTimeoutSeconds", "retentionDays", "alertTopN",
       "narrativeApiState", "exportButton", "clearButton", "toast", "narrativeDetail", "detailBack",
       "detailSymbol", "detailMeta", "detailTokenLink", "detailStatus", "detailContent", "detailConfidence",
@@ -143,6 +144,13 @@ export class MonitorPanel {
     this.bindSetting("desktopToggle", "desktopNotifications");
     this.bindSetting("autoRefreshToggle", "autoRefreshOnStall");
     this.bindSetting("narrativeToggle", "narrativeEnabled");
+    this.elements.fomoToggle.addEventListener("change", () => {
+      const enabled = this.elements.fomoToggle.checked;
+      this.toggleFomo(enabled).catch((error) => {
+        this.elements.fomoToggle.checked = !enabled;
+        this.showToast(error.message, true);
+      });
+    });
     this.elements.intervalSelect.addEventListener("change", () => {
       this.engine.updateSettings({ intervalSeconds: Number(this.elements.intervalSelect.value) })
         .then(() => this.showToast("扫描间隔已更新"))
@@ -196,6 +204,22 @@ export class MonitorPanel {
     });
   }
 
+  async toggleFomo(enabled) {
+    if (!enabled) {
+      await this.engine.updateSettings({ fomoEnabled: false });
+      this.showToast("已关闭 FOMO 占比");
+      return;
+    }
+    const permission = await this.engine.ensureFomoPermission();
+    if (!permission?.granted) {
+      this.elements.fomoToggle.checked = false;
+      this.showToast("请先在扩展弹窗打开 FOMO 占比并允许节点权限", true);
+      return;
+    }
+    await this.engine.updateSettings({ fomoEnabled: true });
+    this.showToast("已启用 FOMO 占比");
+  }
+
   bindSetting(elementId, key) {
     this.elements[elementId].addEventListener("change", () => {
       this.engine.updateSettings({ [key]: this.elements[elementId].checked })
@@ -231,6 +255,7 @@ export class MonitorPanel {
     this.elements.desktopToggle.checked = settings.desktopNotifications;
     this.elements.autoRefreshToggle.checked = settings.autoRefreshOnStall;
     this.elements.narrativeToggle.checked = settings.narrativeEnabled;
+    this.elements.fomoToggle.checked = Boolean(settings.fomoEnabled);
     this.elements.intervalSelect.value = String(settings.intervalSeconds);
     this.layout.apply(settings);
     if (this.shadow.activeElement !== this.elements.connectionTimeoutSeconds) {
@@ -294,11 +319,18 @@ export class MonitorPanel {
     chain.className = "chain";
     chain.textContent = event.manual ? `${event.chain} · 手动` : event.chain;
     nameLine.append(symbol, chain);
+    main.append(nameLine);
+    if (event.fomo?.label) {
+      const fomoLine = document.createElement("span");
+      fomoLine.className = `event-fomo fomo-${event.fomo.status || "running"}`;
+      fomoLine.textContent = event.fomo.label;
+      main.append(fomoLine);
+    }
     const meta = document.createElement("span");
     meta.className = "event-meta";
     meta.textContent = this.narrativePreview(event);
     if (event.narrative?.status) meta.classList.add(`narrative-${event.narrative.status}`);
-    main.append(nameLine, meta);
+    main.append(meta);
 
     const side = document.createElement("span");
     side.className = "event-side";

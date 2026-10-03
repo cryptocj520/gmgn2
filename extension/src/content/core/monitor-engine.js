@@ -210,6 +210,10 @@ export class MonitorEngine {
     return this.gateway.retryNarrative(tokenId, detectedAt);
   }
 
+  ensureFomoPermission() {
+    return this.gateway.ensureFomoPermission();
+  }
+
   async analyzeTopToken() {
     const token = await this.getCurrentTopToken();
     const result = await this.gateway.manualNarrative(token);

@@ -253,6 +253,25 @@ export class DataRepository {
     });
   }
 
+  async listEvents() {
+    await this.initialize();
+    return [...this.data.events];
+  }
+
+  async patchEvents(tokens, patch) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const now = Date.now();
+      const keys = new Set((tokens || []).map((token) => `${token.id}:${token.detectedAt}`));
+      const events = this.data.events.map((event) => keys.has(`${event.id}:${event.detectedAt}`)
+        ? { ...event, ...patch }
+        : event
+      );
+      this.data = { ...this.data, events, updatedAt: now };
+      return this.getSummary();
+    });
+  }
+
   async getNarrativeEvent(tokenId, detectedAt) {
     await this.initialize();
     return this.data.events.find((event) => event.id === tokenId && event.detectedAt === detectedAt) || null;

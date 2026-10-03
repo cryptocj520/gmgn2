@@ -14,6 +14,7 @@ export const MESSAGE = Object.freeze({
   MANUAL_NARRATIVE: "MANUAL_NARRATIVE",
   GET_CURRENT_TOP_TOKEN: "GET_CURRENT_TOP_TOKEN",
   SAVE_AI_CONFIG: "SAVE_AI_CONFIG",
+  FOMO_ENSURE_PERMISSION: "FOMO_ENSURE_PERMISSION",
 });
 
 export const MESSAGE_TARGET = Object.freeze({
@@ -42,6 +43,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   connectionTimeoutSeconds: 30,
   alertTopN: 5,
   narrativeEnabled: true,
+  fomoEnabled: false,
   panelSize: "small",
   panelPosition: null,
 });
