@@ -15,6 +15,8 @@ export class MonitorPanel {
     this.alertRankSaveTimer = 0;
     this.selectedEventKey = "";
     this.lastFreshKey = "";
+    this.lastEventsSignature = null;
+    this.lastError = null;
     this.originalTitle = document.title;
     this.titleTimer = 0;
   }
@@ -296,7 +298,8 @@ export class MonitorPanel {
     this.renderIntegration(state.integrations);
     this.refreshSelectedNarrative(state.events);
     this.handleFresh(state.lastFresh);
-    if (state.error) this.showToast(state.error, true);
+    if (state.error && state.error !== this.lastError) this.showToast(state.error, true);
+    this.lastError = state.error;
   }
 
   renderSettings(settings) {
@@ -326,6 +329,10 @@ export class MonitorPanel {
   }
 
   renderEvents(events) {
+    // 比较完整事件，避免漏掉状态相同但分析结果或 FOMO 数值变化的更新。
+    const signature = JSON.stringify(events);
+    if (signature === this.lastEventsSignature) return;
+    this.lastEventsSignature = signature;
     this.elements.events.replaceChildren();
     if (!events.length) {
       const empty = document.createElement("div");

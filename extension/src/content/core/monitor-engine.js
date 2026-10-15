@@ -109,6 +109,7 @@ export class MonitorEngine {
           lastScanAt: Date.now(),
           status: STATUS.WAITING,
           statusText: "等待榜单数据",
+          error: null,
         }, this.checkPageHealth()));
         return;
       }
@@ -117,6 +118,7 @@ export class MonitorEngine {
       this.needsBaseline = false;
       const alerts = report.alerts || [];
       const patch = {
+        error: null,
         currentCount: report.completeSnapshot ? report.currentCount : this.state.currentCount,
         totalSeen: report.totalSeen,
         events: report.recentEvents,
