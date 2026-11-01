@@ -50,10 +50,22 @@ export class PanelLayoutController {
     const nextSize = PANEL_SIZE_LEVELS[nextIndex];
     if (nextSize === this.size) return;
 
+    const before = this.panel.getBoundingClientRect();
     this.size = nextSize;
     this.panel.dataset.size = nextSize;
     this.updateButtons();
+    this.keepNearestEdge(before);
     this.scheduleClamp(() => this.persist({ panelSize: nextSize, panelPosition: this.position }));
+  }
+
+  // 缩放时固定离面板最近的屏幕边：在右半边就保持右边缘不动，在左半边就保持左边缘不动
+  keepNearestEdge(before) {
+    // 没拖动过时面板按 CSS 停靠在右侧，本来就是以右边缘为准
+    if (!this.position) return;
+    const onRightSide = before.left + before.width / 2 > window.innerWidth / 2;
+    if (!onRightSide) return;
+    const after = this.panel.getBoundingClientRect();
+    this.position = { ...this.position, x: before.right - after.width };
   }
 
   onPointerDown(event) {

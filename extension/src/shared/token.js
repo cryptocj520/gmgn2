@@ -2,6 +2,15 @@ export function normalizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+export function parseMetricNumber(value) {
+  const text = normalizeText(value).replace(/,/g, "");
+  const match = text.match(/[-+]?\d+(?:\.\d+)?\s*([KMB万亿])?/i);
+  if (!match) return null;
+  const units = { K: 1e3, M: 1e6, B: 1e9, 万: 1e4, 亿: 1e8 };
+  const number = Number.parseFloat(match[0]) * (units[(match[1] || "").toUpperCase()] || 1);
+  return Number.isFinite(number) ? number : null;
+}
+
 export function parseTokenHref(href, baseUrl = "https://gmgn.ai") {
   if (!href) return null;
 
@@ -87,6 +96,19 @@ export function parseManualContractAddress(raw) {
   return address;
 }
 
+// 不以 0x 开头的地址只可能属于这些链；其余链都使用 0x 开头的 EVM 地址
+const NON_EVM_CHAINS = new Set(["sol", "tron"]);
+const DEFAULT_NON_EVM_CHAIN = "sol";
+
+// 手动输入 CA 时，当前页面的链只在地址格式对得上时才沿用，避免把 Solana 地址当成 BSC 等链去分析
+export function resolveManualCaChain(pageChain, address) {
+  const chain = String(pageChain || "").trim().toLowerCase();
+  const evmAddress = /^0x/i.test(address);
+  if (chain && evmAddress !== NON_EVM_CHAINS.has(chain)) return chain;
+  if (!evmAddress) return DEFAULT_NON_EVM_CHAIN;
+  throw new Error("无法判断这个 0x 合约属于哪条链，请先在 GMGN 切换到对应链再分析");
+}
+
 export function buildMinimalCaToken(chain, address) {
   const parsed = parseTokenHref(`https://gmgn.ai/${encodeURIComponent(String(chain || "").trim())}/token/${encodeURIComponent(address)}`);
   if (!parsed?.chain || !parsed?.address || !parsed?.id) throw new Error("无法读取当前页面的链信息");
@@ -98,5 +120,7 @@ export function buildMinimalCaToken(chain, address) {
     url: parsed.url,
     symbol: label,
     name: label,
+    // 名称只是截短的地址，分析时不能当真名去搜索
+    nameUnknown: true,
   };
 }

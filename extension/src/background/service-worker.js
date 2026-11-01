@@ -2,14 +2,17 @@ import { AlertService } from "./alert-service.js";
 import { AiConfigStore } from "./ai-config-store.js";
 import { AiUsageStore } from "./ai-usage-store.js";
 import { DataRepository } from "./data-repository.js";
+import { FavoriteStore } from "./favorite-store.js";
 import { GrokNarrativeService } from "./grok-narrative-service.js";
 import { NarrativeCoordinator } from "./narrative-coordinator.js";
 import { OffscreenAiClient } from "./offscreen-ai-client.js";
 import { SecretVault } from "./secret-vault.js";
 import { MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
+import { trendChainFromUrl } from "../shared/gmgn-navigation.js";
 
 const repository = new DataRepository();
 const alerts = new AlertService();
+const favorites = new FavoriteStore(chrome.storage.local);
 const aiConfigStore = new AiConfigStore(chrome.storage.local, new SecretVault());
 const narratives = new NarrativeCoordinator(
   repository,
@@ -18,12 +21,18 @@ const narratives = new NarrativeCoordinator(
 );
 
 const handlers = {
-  [MESSAGE.GET_BOOTSTRAP]: async () => {
-    const [bootstrap, aiConfig] = await Promise.all([
+  [MESSAGE.GET_BOOTSTRAP]: async (_message, sender) => {
+    if (_message.trendPageActive && sender?.tab?.active !== false) {
+      await repository.rememberTrendChain(_message.chain || trendChainFromUrl(sender?.url));
+    }
+    const [bootstrap, aiConfig, favoriteList] = await Promise.all([
       repository.getBootstrap(),
       aiConfigStore.getPublic(),
+      favorites.list(),
     ]);
     bootstrap.aiConfig = aiConfig;
+    bootstrap.favorites = favoriteList;
+    bootstrap.confidenceGroup = await repository.confidenceStore.list();
     bootstrap.integrations = {
       ...bootstrap.integrations,
       grokConfigured: aiConfig.configured,
@@ -36,6 +45,9 @@ const handlers = {
     const report = await repository.processScan(message.tokens || [], {
       baseline: message.baseline,
       completeSnapshot: message.completeSnapshot,
+      // 后台旧标签只上报行情，最近使用链只由当前聚焦页面更新。
+      chain: message.trendPageActive && sender?.tab?.active !== false
+        ? message.chain || trendChainFromUrl(sender?.url) || message.tokens?.[0]?.chain : "",
     });
     if (!report.baseline && report.alerts.length) {
       const { settings } = await repository.getBootstrap();
@@ -49,6 +61,7 @@ const handlers = {
     const patch = message.patch || {};
     const settings = await repository.updateSettings(patch);
     if (patch.narrativeEnabled === false) await repository.cancelNarrativeJobs();
+    if (Object.hasOwn(patch, "maxConcurrentAnalyses")) await narratives.schedulePendingJobs();
     return settings;
   },
   [MESSAGE.TEST_SOUND]: () => alerts.playSound(),
@@ -62,8 +75,10 @@ const handlers = {
     return null;
   },
   [MESSAGE.TEST_GROK_API]: (message) => narratives.testApiKey(message),
-  [MESSAGE.RETRY_NARRATIVE]: (message) => narratives.retryNarrative(message.tokenId, message.detectedAt),
-  [MESSAGE.MANUAL_NARRATIVE]: (message) => narratives.queueManual(message.token),
+  [MESSAGE.RETRY_NARRATIVE]: (message) => narratives.retryNarrative(message.tokenId, message.detectedAt, message.force === true),
+  [MESSAGE.MANUAL_NARRATIVE]: (message) => narratives.queueManual(message.token, message.force === true),
+  [MESSAGE.MANUAL_CA_NARRATIVE]: (message) => narratives.queueManualCa(message.address, message.pageChain, message.force === true),
+  [MESSAGE.TOGGLE_FAVORITE]: (message) => favorites.toggle(message.token),
   [MESSAGE.SAVE_AI_CONFIG]: (message) => narratives.saveAiConfig(message),
 };
 
@@ -84,6 +99,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener(() => repository.initialize());
 chrome.alarms.onAlarm.addListener((alarm) => {
   narratives.handleAlarm(alarm).catch((error) => console.error("[叙事队列] 任务处理失败", error?.message || "任务处理失败"));
+});
+
+chrome.notifications.onClicked.addListener((notificationId) => {
+  alerts.handleNotificationClick(notificationId)
+    .catch((error) => console.error("[桌面通知] 打开代币页面失败", error?.message || "通知处理失败"));
 });
 
 narratives.resume().catch((error) => console.error("[叙事队列] 恢复任务失败", error?.message || "恢复任务失败"));

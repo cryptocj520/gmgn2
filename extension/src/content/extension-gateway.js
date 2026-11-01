@@ -1,4 +1,5 @@
 import { GROK, LIMITS, MESSAGE, MESSAGE_TARGET, STORAGE_KEYS } from "../shared/constants.js";
+import { trendChainFromUrl } from "../shared/gmgn-navigation.js";
 
 export class ExtensionGateway {
   async request(type, payload = {}) {
@@ -20,11 +21,17 @@ export class ExtensionGateway {
   }
 
   getBootstrap() {
-    return this.request(MESSAGE.GET_BOOTSTRAP);
+    return this.request(MESSAGE.GET_BOOTSTRAP, {
+      trendPageActive: document.visibilityState === "visible" && document.hasFocus(),
+      chain: trendChainFromUrl(location.href),
+    });
   }
 
-  processScan(tokens, baseline, completeSnapshot) {
-    return this.request(MESSAGE.PROCESS_SCAN, { tokens, baseline, completeSnapshot });
+  processScan(tokens, baseline, completeSnapshot, chain) {
+    return this.request(MESSAGE.PROCESS_SCAN, {
+      tokens, baseline, completeSnapshot, chain,
+      trendPageActive: document.visibilityState === "visible" && document.hasFocus(),
+    });
   }
 
   updateSettings(patch) {
@@ -47,12 +54,38 @@ export class ExtensionGateway {
     return this.request(MESSAGE.UPDATE_BADGE, { count });
   }
 
-  retryNarrative(tokenId, detectedAt) {
-    return this.request(MESSAGE.RETRY_NARRATIVE, { tokenId, detectedAt });
+  retryNarrative(tokenId, detectedAt, force = false) {
+    return this.request(MESSAGE.RETRY_NARRATIVE, { tokenId, detectedAt, force });
   }
 
-  manualNarrative(token) {
-    return this.request(MESSAGE.MANUAL_NARRATIVE, { token });
+  manualNarrative(token, force = false) {
+    return this.request(MESSAGE.MANUAL_NARRATIVE, { token, force });
+  }
+
+  manualCaNarrative(address, pageChain, force = false) {
+    return this.request(MESSAGE.MANUAL_CA_NARRATIVE, { address, pageChain, force });
+  }
+
+  toggleFavorite(token) {
+    return this.request(MESSAGE.TOGGLE_FAVORITE, { token });
+  }
+
+  onFavoritesChanged(listener) {
+    const handler = (changes, areaName) => {
+      const change = changes[STORAGE_KEYS.FAVORITES];
+      if (areaName === "local" && change) listener(change.newValue || []);
+    };
+    chrome.storage.onChanged.addListener(handler);
+    return () => chrome.storage.onChanged.removeListener(handler);
+  }
+
+  onConfidenceGroupChanged(listener) {
+    const handler = (changes, areaName) => {
+      const change = changes[STORAGE_KEYS.CONFIDENCE_GROUP];
+      if (areaName === "local" && change) listener(change.newValue || []);
+    };
+    chrome.storage.onChanged.addListener(handler);
+    return () => chrome.storage.onChanged.removeListener(handler);
   }
 
   onSettingsChanged(listener) {
