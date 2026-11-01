@@ -656,7 +656,7 @@ export class MonitorPanel {
     this.selectedEvent = event;
     this.elements.detailSymbol.textContent = event.symbol || "未知代币";
     const mode = event.manual ? "手动分析 · " : "";
-    this.elements.detailMeta.textContent = `${mode}${event.chain.toUpperCase()} · 第 ${event.rank || "--"} 名 · ${event.volumePeriod || "--"}成交额 ${event.volume || "--"}`;
+    this.elements.detailMeta.textContent = `${mode}${event.chain.toUpperCase()} · 第 ${event.rank || "--"} 名 · ${event.volumePeriod || "--"}成交额 ${event.volume || "--"}${event.fees != null && event.fees !== "" ? ` · 手续费 ${event.fees}` : ""}`;
     this.elements.detailTokenLink.href = event.url;
     const narrative = event.narrative;
     const statusText = {

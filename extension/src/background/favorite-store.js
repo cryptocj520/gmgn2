@@ -43,6 +43,7 @@ function favoriteSnapshot(token) {
     name: token.name || "",
     image: token.image || "",
     url: token.url || "",
+    fees: token.fees,
     favoritedAt: Date.now(),
   };
 }

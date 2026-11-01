@@ -58,7 +58,7 @@ function qualifies(token) {
 function snapshot(token) {
   return {
     id: token.id, address: token.address, chain: token.chain || "", symbol: token.symbol || "",
-    name: token.name || "", image: token.image || "", url: token.url || "", marketCap: token.marketCap,
+    name: token.name || "", image: token.image || "", url: token.url || "", marketCap: token.marketCap, fees: token.fees,
     narrative: token.narrative, analyzedAt: analyzedTime(token),
   };
 }
