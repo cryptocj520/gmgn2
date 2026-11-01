@@ -16,6 +16,9 @@ export const MESSAGE = Object.freeze({
   TOGGLE_FAVORITE: "TOGGLE_FAVORITE",
   GET_CURRENT_TOP_TOKEN: "GET_CURRENT_TOP_TOKEN",
   SAVE_AI_CONFIG: "SAVE_AI_CONFIG",
+  FOMO_ENSURE_PERMISSION: "FOMO_ENSURE_PERMISSION",
+  FOMO_TOGGLE_LIVE: "FOMO_TOGGLE_LIVE",
+  FOMO_REFRESH_ONCE: "FOMO_REFRESH_ONCE",
 });
 
 export const MESSAGE_TARGET = Object.freeze({
@@ -53,6 +56,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   minLiquidity: 0,
   minHolders: 0,
   minMarketCap: 0,
+  fomoEnabled: false,
   panelSize: "small",
   panelPosition: null,
 });

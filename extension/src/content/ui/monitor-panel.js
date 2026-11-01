@@ -5,7 +5,7 @@ import { PANEL_STYLES } from "./panel-styles.js";
 
 // 置信度等级 -> 显示文字，列表标签和详情页共用一份
 const CONFIDENCE_LABELS = { high: "高置信度", medium: "中置信度", low: "低置信度" };
-const NARRATIVE_IN_PROGRESS = new Set(["queued", "retrying"]);
+const NARRATIVE_IN_PROGRESS = new Set(["queued", "processing", "retrying"]);
 
 export class MonitorPanel {
   constructor(engine) {
@@ -21,6 +21,8 @@ export class MonitorPanel {
     this.listView = "events";
     this.menuEvent = null;
     this.lastFreshKey = "";
+    this.lastEventsSignature = null;
+    this.lastError = null;
     this.originalTitle = document.title;
     this.titleTimer = 0;
   }
@@ -68,13 +70,14 @@ export class MonitorPanel {
         </div>
         <div class="content"><div class="section-head"><div class="list-tabs" role="tablist"><button class="list-tab active" id="eventsTab" type="button" role="tab">提醒记录</button><button class="list-tab" id="favoritesTab" type="button" role="tab">关注</button><button class="list-tab" id="confidenceTab" type="button" role="tab">置信度 0</button></div><span class="section-count" id="eventCount">0 条</span></div><div class="events" id="events"></div></div>
         <div class="row-menu" id="rowMenu" role="menu"><button type="button" role="menuitem" data-action="copy">复制地址</button><button type="button" role="menuitem" data-action="open">打开代币页</button><button type="button" role="menuitem" data-action="analyze">分析代币</button><button type="button" role="menuitem" data-action="favorite" id="rowMenuFavorite">关注</button></div>
-        <footer class="footer"><span class="footer-state"></span><span>首次进入提醒名次 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.14.0</span></footer>
+        <footer class="footer"><span class="footer-state"></span><span>首次进入提醒名次 · 跟随当前筛选</span><span class="footer-spacer"></span><span class="version">v0.16.0</span></footer>
         <aside class="settings" id="settingsPanel">
           <h2 class="settings-title">监控设置</h2>
           ${this.toggleSetting("autoStartToggle", "打开页面自动监控", "首次榜单仍会静默建立基线")}
           ${this.toggleSetting("desktopToggle", "桌面通知", "声音以外再显示系统通知")}
           ${this.toggleSetting("autoRefreshToggle", "连接超时自动刷新", "读取 GMGN 底部连接状态")}
           ${this.toggleSetting("narrativeToggle", "自动叙事分析", "报警后调用 Grok 分析")}
+          ${this.toggleSetting("fomoToggle", "启用 FOMO 占比", "新提醒算一次；刷新/跟随在卡片上")}
           <div class="setting-row"><div class="setting-main"><div class="setting-name">Grok API</div><div class="setting-note">在扩展弹窗中配置接口和密钥</div></div><span class="api-state" id="narrativeApiState">未配置</span></div>
           <button class="action-button manual-analysis" id="manualNarrativeButton" type="button">手动分析当前榜首</button>
           <div class="ca-action">
@@ -119,7 +122,7 @@ export class MonitorPanel {
       "launcher", "launcherBadge", "panel", "panelHeader", "statusDot", "statusText", "settingsButton",
       "shrinkPanelButton", "growPanelButton", "collapseButton", "settingsPanel", "startButton", "startIcon", "startLabel", "soundToggle",
       "testSoundButton", "seenValue", "currentValue", "newValue", "scanValue", "eventCount",
-      "events", "autoStartToggle", "desktopToggle", "autoRefreshToggle", "narrativeToggle", "intervalSelect",
+      "events", "autoStartToggle", "desktopToggle", "autoRefreshToggle", "narrativeToggle", "fomoToggle", "intervalSelect",
       "connectionTimeoutSeconds", "retentionDays", "alertTopN",
       "narrativeApiState", "exportButton", "clearButton", "toast", "narrativeDetail", "detailBack",
       "detailSymbol", "detailMeta", "detailTokenLink", "detailStatus", "detailContent", "detailConfidence",
@@ -152,6 +155,13 @@ export class MonitorPanel {
     this.bindSetting("desktopToggle", "desktopNotifications");
     this.bindSetting("autoRefreshToggle", "autoRefreshOnStall");
     this.bindSetting("narrativeToggle", "narrativeEnabled");
+    this.elements.fomoToggle.addEventListener("change", () => {
+      const enabled = this.elements.fomoToggle.checked;
+      this.toggleFomo(enabled).catch((error) => {
+        this.elements.fomoToggle.checked = !enabled;
+        this.showToast(error.message, true);
+      });
+    });
     this.elements.intervalSelect.addEventListener("change", () => {
       this.engine.updateSettings({ intervalSeconds: Number(this.elements.intervalSelect.value) })
         .then(() => this.showToast("扫描间隔已更新"))
@@ -236,6 +246,73 @@ export class MonitorPanel {
     this.elements.events.addEventListener("scroll", () => this.closeRowMenu());
   }
 
+  async toggleFomo(enabled) {
+    if (!enabled) {
+      await this.engine.updateSettings({ fomoEnabled: false });
+      this.showToast("已关闭 FOMO 占比");
+      return;
+    }
+    const permission = await this.engine.ensureFomoPermission();
+    if (!permission?.granted) {
+      this.elements.fomoToggle.checked = false;
+      this.showToast("请先在扩展弹窗打开 FOMO 占比并允许节点权限", true);
+      return;
+    }
+    await this.engine.updateSettings({ fomoEnabled: true });
+    this.showToast("已启用 FOMO 占比");
+  }
+
+  createFomoRow(event) {
+    const row = document.createElement("span");
+    row.className = "event-fomo-row";
+    const label = document.createElement("span");
+    label.className = `event-fomo fomo-${event.fomo?.status || "unavailable"}`;
+    if (event.fomo?.live) label.classList.add("fomo-live");
+    label.textContent = event.fomo?.label || "FOMO 未查询";
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "fomo-action";
+    refresh.textContent = "刷新";
+    refresh.title = "只查这一枚一次";
+    refresh.addEventListener("click", (clickEvent) => {
+      clickEvent.preventDefault();
+      clickEvent.stopPropagation();
+      this.refreshFomoOnce(event);
+    });
+    const follow = document.createElement("button");
+    follow.type = "button";
+    follow.className = "fomo-action";
+    if (event.fomo?.live) follow.classList.add("is-on");
+    follow.textContent = event.fomo?.live ? "跟随中" : "跟随";
+    follow.title = event.fomo?.live ? "停止跟着刷" : "约 3 分钟刷新这一枚";
+    follow.addEventListener("click", (clickEvent) => {
+      clickEvent.preventDefault();
+      clickEvent.stopPropagation();
+      this.toggleFomoLive(event);
+    });
+    row.append(label, refresh, follow);
+    return row;
+  }
+
+  async refreshFomoOnce(event) {
+    try {
+      await this.engine.refreshFomoOnce(event.id, event.detectedAt);
+      this.showToast("正在刷新这一枚 FOMO 占比");
+    } catch (error) {
+      this.showToast(error.message, true);
+    }
+  }
+
+  async toggleFomoLive(event) {
+    const live = !event.fomo?.live;
+    try {
+      await this.engine.toggleFomoLive(event.id, event.detectedAt, live);
+      this.showToast(live ? "已开启这一枚跟随" : "已停止这一枚跟随");
+    } catch (error) {
+      this.showToast(error.message, true);
+    }
+  }
+
   bindSetting(elementId, key) {
     this.elements[elementId].addEventListener("change", () => {
       this.engine.updateSettings({ [key]: this.elements[elementId].checked })
@@ -265,7 +342,8 @@ export class MonitorPanel {
     this.renderIntegration(state.integrations);
     this.refreshSelectedNarrative(state.events);
     this.handleFresh(state.lastFresh);
-    if (state.error) this.showToast(state.error, true);
+    if (state.error && state.error !== this.lastError) this.showToast(state.error, true);
+    this.lastError = state.error;
   }
 
   renderSettings(settings) {
@@ -275,6 +353,7 @@ export class MonitorPanel {
     this.elements.desktopToggle.checked = settings.desktopNotifications;
     this.elements.autoRefreshToggle.checked = settings.autoRefreshOnStall;
     this.elements.narrativeToggle.checked = settings.narrativeEnabled;
+    this.elements.fomoToggle.checked = Boolean(settings.fomoEnabled);
     this.elements.intervalSelect.value = String(settings.intervalSeconds);
     this.layout.apply(settings);
     if (this.shadow.activeElement !== this.elements.connectionTimeoutSeconds) {
@@ -320,6 +399,10 @@ export class MonitorPanel {
   }
 
   renderEvents(events) {
+    // 比较完整事件，避免漏掉状态相同但分析结果或 FOMO 数值变化的更新。
+    const signature = JSON.stringify([this.listView, [...this.favoriteIds], events]);
+    if (signature === this.lastEventsSignature) return;
+    this.lastEventsSignature = signature;
     this.elements.events.replaceChildren();
     if (!events.length) {
       const empty = document.createElement("div");
@@ -405,6 +488,9 @@ export class MonitorPanel {
 
     openButton.append(image, main, side);
     row.append(openButton, moreButton);
+    if (String(event.chain || "").toLowerCase() === "robinhood" && !event.favoriteOnly) {
+      row.appendChild(this.createFomoRow(event));
+    }
     return row;
   }
 
@@ -529,6 +615,7 @@ export class MonitorPanel {
   narrativePreview(event) {
     const states = {
       queued: "Grok 分析排队中…",
+      processing: "Grok 正在分析…",
       retrying: "Grok 分析重试中…",
       waiting_key: "等待 AI 配置或授权",
       cancelled: "自动叙事分析已关闭",
@@ -573,7 +660,8 @@ export class MonitorPanel {
     this.elements.detailTokenLink.href = event.url;
     const narrative = event.narrative;
     const statusText = {
-      queued: "Grok 正在搜索公开资料并生成叙事分析…",
+      queued: "已加入分析队列，上一条完成后开始。",
+      processing: "Grok 正在搜索公开资料并生成叙事分析…",
       retrying: "首次请求失败，正在进行最后一次重试…",
       waiting_key: "尚未完成 AI 配置或未授权访问接口。保存配置后可手动重新分析本条提醒。",
       cancelled: narrative?.error || "自动叙事分析已关闭",

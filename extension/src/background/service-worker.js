@@ -7,6 +7,7 @@ import { GrokNarrativeService } from "./grok-narrative-service.js";
 import { NarrativeCoordinator } from "./narrative-coordinator.js";
 import { OffscreenAiClient } from "./offscreen-ai-client.js";
 import { SecretVault } from "./secret-vault.js";
+import { FomoCoordinator } from "../fomo/coordinator.js";
 import { MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
 import { trendChainFromUrl } from "../shared/gmgn-navigation.js";
 
@@ -14,6 +15,7 @@ const repository = new DataRepository();
 const alerts = new AlertService();
 const favorites = new FavoriteStore(chrome.storage.local);
 const aiConfigStore = new AiConfigStore(chrome.storage.local, new SecretVault());
+const fomo = new FomoCoordinator(repository);
 const narratives = new NarrativeCoordinator(
   repository,
   new GrokNarrativeService(new OffscreenAiClient(), new AiUsageStore()),
@@ -49,8 +51,18 @@ const handlers = {
       chain: message.trendPageActive && sender?.tab?.active !== false
         ? message.chain || trendChainFromUrl(sender?.url) || message.tokens?.[0]?.chain : "",
     });
+    const { settings } = await repository.getBootstrap();
+    if (!report.baseline) {
+      Promise.resolve()
+        .then(async () => {
+          if (report.alerts.length) await fomo.queueAlerts(report.alerts, settings);
+          await fomo.catchUp(settings);
+        })
+        .catch((error) => {
+          console.error("[FOMO] 旁路检测失败", error?.message || "检测失败");
+        });
+    }
     if (!report.baseline && report.alerts.length) {
-      const { settings } = await repository.getBootstrap();
       await alerts.notify(report, settings, sender.tab?.id);
       const summary = await narratives.queueAlerts(report.alerts, settings);
       report.recentEvents = summary.recentEvents;
@@ -62,6 +74,7 @@ const handlers = {
     const settings = await repository.updateSettings(patch);
     if (patch.narrativeEnabled === false) await repository.cancelNarrativeJobs();
     if (Object.hasOwn(patch, "maxConcurrentAnalyses")) await narratives.schedulePendingJobs();
+    if (patch.fomoEnabled === false) await fomo.cancelPending();
     return settings;
   },
   [MESSAGE.TEST_SOUND]: () => alerts.playSound(),
@@ -80,6 +93,9 @@ const handlers = {
   [MESSAGE.MANUAL_CA_NARRATIVE]: (message) => narratives.queueManualCa(message.address, message.pageChain, message.force === true),
   [MESSAGE.TOGGLE_FAVORITE]: (message) => favorites.toggle(message.token),
   [MESSAGE.SAVE_AI_CONFIG]: (message) => narratives.saveAiConfig(message),
+  [MESSAGE.FOMO_ENSURE_PERMISSION]: () => fomo.ensurePermission({ openSettings: true }),
+  [MESSAGE.FOMO_TOGGLE_LIVE]: (message) => fomo.toggleLive(message.tokenId, message.detectedAt, message.live),
+  [MESSAGE.FOMO_REFRESH_ONCE]: (message) => fomo.refreshOnce(message.tokenId, message.detectedAt),
 };
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -107,3 +123,4 @@ chrome.notifications.onClicked.addListener((notificationId) => {
 });
 
 narratives.resume().catch((error) => console.error("[叙事队列] 恢复任务失败", error?.message || "恢复任务失败"));
+fomo.resume().catch((error) => console.error("[FOMO] 恢复检测失败", error?.message || "恢复失败"));

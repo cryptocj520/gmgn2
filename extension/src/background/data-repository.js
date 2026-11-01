@@ -305,12 +305,37 @@ export class DataRepository {
         startedAt: now,
         nextAttemptAt: 0,
       };
+      const events = this.updateEventNarrative(updatedJob, {
+        status: "processing",
+        jobId,
+        updatedAt: now,
+      });
       this.data = {
         ...this.data,
+        events,
         narrativeJobs: { ...this.data.narrativeJobs, [jobId]: updatedJob },
         updatedAt: now,
       };
       return { claimed: true, job: updatedJob, retryAt: 0 };
+    });
+  }
+
+  async listEvents() {
+    await this.initialize();
+    return [...this.data.events];
+  }
+
+  async patchEvents(tokens, patch) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const now = Date.now();
+      const keys = new Set((tokens || []).map((token) => `${token.id}:${token.detectedAt}`));
+      const events = this.data.events.map((event) => keys.has(`${event.id}:${event.detectedAt}`)
+        ? { ...event, ...patch }
+        : event
+      );
+      this.data = { ...this.data, events, updatedAt: now };
+      return this.getSummary();
     });
   }
 

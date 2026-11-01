@@ -235,6 +235,18 @@ export class MonitorEngine {
     return result.favorited;
   }
 
+  ensureFomoPermission() {
+    return this.gateway.ensureFomoPermission();
+  }
+
+  toggleFomoLive(tokenId, detectedAt, live) {
+    return this.gateway.toggleFomoLive(tokenId, detectedAt, live);
+  }
+
+  refreshFomoOnce(tokenId, detectedAt) {
+    return this.gateway.refreshFomoOnce(tokenId, detectedAt);
+  }
+
   async analyzeTopToken(force = false, selectedToken = null) {
     const token = selectedToken || await this.getCurrentTopToken();
     const result = await this.gateway.manualNarrative(token, force);

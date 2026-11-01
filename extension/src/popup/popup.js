@@ -1,5 +1,6 @@
 import { GROK, MESSAGE, MESSAGE_TARGET, STORAGE_KEYS } from "../shared/constants.js";
 import { buildTrendUrl } from "../shared/gmgn-navigation.js";
+import { FOMO } from "../fomo/constants.js";
 import {
   normalizeAuthType,
   normalizeGrokApiMode,
@@ -13,7 +14,7 @@ import { formatClock, parseManualContractAddress } from "../shared/token.js";
 
 const settingIds = [
   "autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "alertTopN",
-  "intervalSeconds", "connectionTimeoutSeconds", "retentionDays", "narrativeEnabled",
+  "intervalSeconds", "connectionTimeoutSeconds", "retentionDays", "narrativeEnabled", "fomoEnabled",
   "maxConcurrentAnalyses", "minLiquidity", "minHolders", "minMarketCap",
 ];
 const elements = Object.fromEntries([
@@ -62,7 +63,7 @@ function render(bootstrap) {
   const { settings, summary, integrations, aiConfig } = bootstrap;
   currentSettings = settings;
   currentAiConfig = aiConfig || integrations;
-  for (const id of ["autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "narrativeEnabled"]) {
+  for (const id of ["autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "narrativeEnabled", "fomoEnabled"]) {
     elements[id].checked = settings[id];
   }
   elements.alertTopN.value = String(settings.alertTopN);
@@ -107,6 +108,13 @@ settingIds.forEach((id) => {
     const numeric = ["alertTopN", "intervalSeconds", "connectionTimeoutSeconds", "retentionDays",
       "maxConcurrentAnalyses", "minLiquidity", "minHolders", "minMarketCap"].includes(id);
     try {
+      if (id === "fomoEnabled" && elements.fomoEnabled.checked) {
+        const granted = await chrome.permissions.request({ origins: [FOMO.RPC_PERMISSION] });
+        if (!granted) {
+          elements.fomoEnabled.checked = false;
+          throw new Error("未获得 Robinhood 节点访问权限");
+        }
+      }
       currentSettings = await request(MESSAGE.UPDATE_SETTINGS, { patch: { [id]: numeric ? Number(elements[id].value) : elements[id].checked } });
       if (numeric) elements[id].value = String(currentSettings[id]);
       showMessage("设置已保存");
