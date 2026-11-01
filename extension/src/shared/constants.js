@@ -12,8 +12,13 @@ export const MESSAGE = Object.freeze({
   TEST_GROK_API: "TEST_GROK_API",
   RETRY_NARRATIVE: "RETRY_NARRATIVE",
   MANUAL_NARRATIVE: "MANUAL_NARRATIVE",
+  MANUAL_CA_NARRATIVE: "MANUAL_CA_NARRATIVE",
+  TOGGLE_FAVORITE: "TOGGLE_FAVORITE",
   GET_CURRENT_TOP_TOKEN: "GET_CURRENT_TOP_TOKEN",
   SAVE_AI_CONFIG: "SAVE_AI_CONFIG",
+  FOMO_ENSURE_PERMISSION: "FOMO_ENSURE_PERMISSION",
+  FOMO_TOGGLE_LIVE: "FOMO_TOGGLE_LIVE",
+  FOMO_REFRESH_ONCE: "FOMO_REFRESH_ONCE",
 });
 
 export const MESSAGE_TARGET = Object.freeze({
@@ -28,7 +33,12 @@ export const STORAGE_KEYS = Object.freeze({
   INTEGRATIONS: "gmgnMonitorIntegrationsV1",
   AI_CONFIG: "gmgnAiConfigV1",
   AI_USAGE: "gmgnAiUsageV1",
+  LAST_CHAIN: "gmgnLastTrendChain",
+  FAVORITES: "gmgnFavoritesV1",
+  CONFIDENCE_GROUP: "gmgnConfidenceGroupV1",
 });
+
+export const CONFIDENCE_GROUP_LEVELS = Object.freeze(["medium", "high"]);
 
 export const DATA_SCHEMA_VERSION = 6;
 
@@ -42,6 +52,11 @@ export const DEFAULT_SETTINGS = Object.freeze({
   connectionTimeoutSeconds: 30,
   alertTopN: 5,
   narrativeEnabled: true,
+  maxConcurrentAnalyses: 2,
+  minLiquidity: 0,
+  minHolders: 0,
+  minMarketCap: 0,
+  fomoEnabled: false,
   panelSize: "small",
   panelPosition: null,
 });
@@ -49,7 +64,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
 export const LIMITS = Object.freeze({
   MAX_EVENTS: 300,
   PANEL_EVENTS: 100,
-  SNAPSHOT_LENGTH: 1800,
+  SNAPSHOT_LENGTH: 240,
+  LAST_SEEN_WRITE_INTERVAL_MS: 60000,
+  MIN_CONCURRENT_ANALYSES: 1,
+  MAX_CONCURRENT_ANALYSES: 3,
   MIN_RETENTION_DAYS: 1,
   MAX_RETENTION_DAYS: 365,
   MIN_CONNECTION_TIMEOUT_SECONDS: 10,
@@ -57,23 +75,26 @@ export const LIMITS = Object.freeze({
   MIN_ALERT_TOP_N: 1,
   MAX_ALERT_TOP_N: 100,
   MAX_NARRATIVE_LINKS: 8,
+  MAX_FAVORITES: 200,
+  MAX_CONFIDENCE_GROUP: 200,
 });
 
 export const GROK = Object.freeze({
-  API_BASE_URL: "http://192.119.105.12:9434/v1",
+  API_BASE_URL: "",
   MODEL: "grok-4.6",
-  REQUEST_TIMEOUT_MS: 180000,
+  REQUEST_TIMEOUT_MS: 300000,
   VALIDATION_TIMEOUT_MS: 180000,
   MAX_OUTPUT_TOKENS: 4000,
   MAX_TOOL_CALLS: 3,
-  MAX_CONCURRENT_ANALYSES: 1,
+  MAX_CONCURRENT_ANALYSES: 2,
   PROCESSING_LEASE_MS: 330000,
   MAX_RETRIES: 1,
   RETRY_DELAY_MS: 15000,
   ALARM_PREFIX: "gmgn-narrative:",
   MIN_TIMEOUT_SECONDS: 15,
   MAX_TIMEOUT_SECONDS: 300,
-  DEFAULT_TIMEOUT_SECONDS: 180,
+  DEFAULT_TIMEOUT_SECONDS: 300,
+  RECENT_ANALYSIS_HOURS: 6,
   MAX_USAGE_RECORDS: 200,
 });
 
@@ -108,4 +129,4 @@ export const ALERT_SOUND = Object.freeze({
   ],
 });
 
-export const GMGN_URL = "https://gmgn.ai/trend?chain=robinhood";
+export const GMGN_URL = "https://gmgn.ai/trend";

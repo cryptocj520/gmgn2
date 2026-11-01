@@ -1,4 +1,5 @@
 import { GROK } from "../shared/constants.js";
+import { buildMinimalCaToken, parseManualContractAddress, resolveManualCaChain } from "../shared/token.js";
 import {
   normalizeAiConfig,
   permissionPatternForBaseUrl,
@@ -11,11 +12,6 @@ export class NarrativeCoordinator {
     this.repository = repository;
     this.service = service;
     this.aiConfigStore = aiConfigStore;
-    this.processingQueues = Array.from(
-      { length: GROK.MAX_CONCURRENT_ANALYSES },
-      () => Promise.resolve(),
-    );
-    this.nextQueue = 0;
   }
 
   async queueAlerts(tokens, settings) {
@@ -65,33 +61,46 @@ export class NarrativeCoordinator {
     return this.integrationStatus(saved);
   }
 
-  async retryNarrative(tokenId, detectedAt) {
+  async retryNarrative(tokenId, detectedAt, force = false) {
     const event = await this.repository.getNarrativeEvent(tokenId, detectedAt);
     if (!event) throw new Error("找不到对应提醒记录");
-    if (!await this.aiConfigStore.isConfigured()) return this.repository.markNarrativesWaitingForKey([event]);
+    const active = await this.repository.getActiveNarrative(tokenId);
+    if (active) return active;
+    if (!await this.aiConfigStore.isConfigured()) {
+      const summary = await this.repository.markNarrativesWaitingForKey([event]);
+      return { summary, event, alreadyInProgress: false };
+    }
     const publicConfig = await this.aiConfigStore.getPublic();
     if (!await this.hasAiPermission(publicConfig.grokBaseUrl)) {
       throw new Error("请先保存配置并允许访问 AI 地址");
     }
-    const queued = await this.repository.queueNarratives([event]);
-    queued.jobIds.forEach((jobId) => this.schedule(jobId));
-    return queued.summary;
+    const queued = await this.repository.queueNarratives([event], { checkRecent: true, force });
+    queued.jobIds?.forEach((jobId) => this.schedule(jobId));
+    return queued;
   }
 
-  async queueManual(token) {
+  async queueManual(token, force = false) {
     if (!token?.id || !token?.address) throw new Error("缺少合约信息，无法分析");
+    const active = await this.repository.getActiveNarrative(token.id);
+    if (active) return active;
     if (!await this.aiConfigStore.isConfigured()) throw new Error("尚未配置 API Key");
     const publicConfig = await this.aiConfigStore.getPublic();
     if (!await this.hasAiPermission(publicConfig.grokBaseUrl)) {
       throw new Error("请先保存配置并允许访问 AI 地址");
     }
-    const event = await this.repository.createManualNarrativeEvent(token);
-    const queued = await this.repository.queueNarratives([event]);
-    queued.jobIds.forEach((jobId) => this.schedule(jobId));
-    const queuedEvent = queued.summary.recentEvents.find((item) =>
-      item.id === event.id && item.detectedAt === event.detectedAt
-    );
-    return { event: queuedEvent || event, summary: queued.summary };
+    const queued = await this.repository.queueNarratives([token], { manual: true, checkRecent: true, force });
+    queued.jobIds?.forEach((jobId) => this.schedule(jobId));
+    return queued;
+  }
+
+  // 指定 CA：榜单上见过就直接用完整记录（名称、链、行情），不要求当前打开着热门榜；
+  // 没见过才按地址格式定链，页面链和上次浏览的链只作参考
+  async queueManualCa(rawAddress, pageChain, force = false) {
+    const address = parseManualContractAddress(rawAddress);
+    const seen = await this.repository.findSeenToken(address);
+    if (seen) return this.queueManual(seen, force);
+    const chain = resolveManualCaChain(pageChain || this.repository.lastChain, address);
+    return this.queueManual(buildMinimalCaToken(chain, address), force);
   }
 
   async resume() {
@@ -131,11 +140,16 @@ export class NarrativeCoordinator {
 
   handleAlarm(alarm) {
     if (!alarm.name.startsWith(GROK.ALARM_PREFIX)) return Promise.resolve();
-    const task = () => this.processJob(alarm.name.slice(GROK.ALARM_PREFIX.length));
-    const queueIndex = this.nextQueue % this.processingQueues.length;
-    this.nextQueue += 1;
-    this.processingQueues[queueIndex] = this.processingQueues[queueIndex].then(task, task);
-    return this.processingQueues[queueIndex];
+    // 并发状态只由仓库的串行领取入口管理，避免另一套 Promise 队列阻塞空位。
+    return this.processJob(alarm.name.slice(GROK.ALARM_PREFIX.length));
+  }
+
+  async schedulePendingJobs() {
+    const now = Date.now();
+    const jobs = await this.repository.getNarrativeJobs();
+    for (const job of jobs) {
+      if (job.status === "queued") this.schedule(job.jobId, Math.max(100, (job.nextAttemptAt || 0) - now));
+    }
   }
 
   async processJob(jobId) {
@@ -146,12 +160,11 @@ export class NarrativeCoordinator {
       return;
     }
     const job = claim.job;
-    if (!await this.aiConfigStore.isConfigured()) {
-      await this.repository.failNarrativeJob(jobId, "API Key 已移除");
-      return;
-    }
-
     try {
+      if (!await this.aiConfigStore.isConfigured()) {
+        await this.repository.failNarrativeJob(jobId, "API Key 已移除");
+        return;
+      }
       const config = await this.aiConfigStore.getRuntimeConfig();
       if (!await this.hasAiPermission(config.grokBaseUrl)) {
         await this.repository.parkNarrativeJob(jobId);
@@ -168,6 +181,8 @@ export class NarrativeCoordinator {
       }
       console.error("[叙事分析] Grok 分析失败", error.message || "Grok 分析失败");
       await this.repository.failNarrativeJob(jobId, error.message || "Grok 分析失败");
+    } finally {
+      await this.schedulePendingJobs();
     }
   }
 

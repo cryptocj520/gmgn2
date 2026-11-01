@@ -1,5 +1,5 @@
 import { SCANNER } from "../../shared/constants.js";
-import { buildMinimalCaToken, parseManualContractAddress } from "../../shared/token.js";
+import { parseManualContractAddress } from "../../shared/token.js";
 
 const STATUS = Object.freeze({
   IDLE: "idle",
@@ -36,6 +36,8 @@ export class MonitorEngine {
       sessionNew: 0,
       lastScanAt: 0,
       events: [],
+      favorites: [],
+      confidenceGroup: [],
       lastFresh: [],
       error: null,
     };
@@ -49,10 +51,14 @@ export class MonitorEngine {
       integrations: bootstrap.integrations,
       totalSeen: bootstrap.summary.totalSeen,
       events: bootstrap.summary.recentEvents,
+      favorites: bootstrap.favorites || [],
+      confidenceGroup: bootstrap.confidenceGroup || [],
       statusText: bootstrap.settings.autoStart ? "正在自动启动" : "待启动",
     });
     this.lifetimeCleanups.push(this.gateway.onSettingsChanged((settings) => this.applyExternalSettings(settings)));
     this.lifetimeCleanups.push(this.gateway.onDataChanged((summary) => this.applyExternalData(summary)));
+    this.lifetimeCleanups.push(this.gateway.onFavoritesChanged((favorites) => this.patchState({ favorites })));
+    this.lifetimeCleanups.push(this.gateway.onConfidenceGroupChanged((confidenceGroup) => this.patchState({ confidenceGroup })));
     this.lifetimeCleanups.push(this.gateway.onIntegrationsChanged((integration) => {
       this.patchState({ integrations: integration });
     }));
@@ -71,6 +77,8 @@ export class MonitorEngine {
       settings: this.state.settings ? { ...this.state.settings } : null,
       integrations: this.state.integrations ? { ...this.state.integrations } : null,
       events: [...this.state.events],
+      favorites: [...this.state.favorites],
+      confidenceGroup: [...this.state.confidenceGroup],
       lastFresh: [...this.state.lastFresh],
     };
   }
@@ -80,7 +88,7 @@ export class MonitorEngine {
     this.patchState({
       running: true,
       status: this.needsBaseline ? STATUS.BASELINING : STATUS.RUNNING,
-      statusText: this.needsBaseline ? "正在建立完整基线" : "监控中",
+      statusText: this.needsBaseline ? "正在建立基线" : "监控中",
     });
     this.runtimeCleanups.push(this.source.observeChanges(() => this.scheduleScan()));
     this.runtimeCleanups.push(this.source.observeVisibility(() => this.tryBackgroundFullScan()));
@@ -97,37 +105,46 @@ export class MonitorEngine {
 
   async scan(options = {}) {
     const baseline = Boolean(options.baseline || this.needsBaseline);
-    const completeSnapshot = Boolean(options.completeSnapshot);
+    let completeSnapshot = Boolean(options.completeSnapshot && this.source.canRunBackgroundFullScan?.());
     if ((!this.state.running && !baseline) || this.scanning) return;
 
     this.scanning = true;
     try {
+      // GMGN 是单页应用：在同一标签页点进代币详情后脚本仍在运行，此时页面上没有榜单，暂停而不是报错
+      if (this.source.isLeaderboardPage?.() === false) {
+        this.patchState({ status: STATUS.WAITING, statusText: "已离开热门页，返回后继续", error: null });
+        return;
+      }
       const tokens = await this.source.readTokens({ deep: completeSnapshot });
-      if (!tokens.length) {
+      completeSnapshot = completeSnapshot && this.source.lastReadComplete !== false;
+      if (!tokens.length && baseline) {
         this.patchState(this.applyHealth({
           currentCount: completeSnapshot ? 0 : this.state.currentCount,
           lastScanAt: Date.now(),
           status: STATUS.WAITING,
           statusText: "等待榜单数据",
+          error: null,
         }, this.checkPageHealth()));
         return;
       }
 
-      const report = await this.gateway.processScan(tokens, baseline, completeSnapshot);
+      const report = await this.gateway.processScan(tokens, baseline, completeSnapshot, this.source.getCurrentChain?.());
       this.needsBaseline = false;
       const alerts = report.alerts || [];
       const patch = {
-        currentCount: report.completeSnapshot ? report.currentCount : this.state.currentCount,
+        currentCount: report.completeSnapshot || baseline ? report.currentCount : this.state.currentCount,
         totalSeen: report.totalSeen,
         events: report.recentEvents,
         lastScanAt: report.processedAt,
         lastFresh: alerts,
+        // 扫描恢复后清掉上次的错误，否则面板每次刷新都会重新弹出旧提示
+        error: null,
         status: alerts.length ? STATUS.FOUND : STATUS.RUNNING,
         statusText: alerts.length
           ? `${alerts.length} 个代币首次进入提醒名次`
           : report.removed
             ? `已清理 ${report.removed} 个过期记录`
-            : "监控中",
+            : tokens.length ? "监控中" : "等待榜单数据",
       };
       if (alerts.length) {
         patch.sessionNew = this.state.sessionNew + alerts.length;
@@ -137,7 +154,7 @@ export class MonitorEngine {
     } catch (error) {
       console.error("[监控引擎] 扫描失败", error);
       this.patchState(this.applyHealth(
-        { status: STATUS.ERROR, statusText: "扫描失败", error: error.message },
+        { status: STATUS.ERROR, statusText: error.code === "GMGN_STRUCTURE_CHANGED" ? error.message : "扫描失败", error: error.message },
         this.checkPageHealth(),
       ));
     } finally {
@@ -158,7 +175,9 @@ export class MonitorEngine {
   }
 
   applyHealth(patch, health) {
+    if (patch.status === STATUS.ERROR) return patch;
     const overrides = {
+      unavailable: { statusText: "无法读取连接状态" },
       offline: { status: STATUS.WAITING, statusText: "网络已断开，等待恢复" },
       pending: {
         status: STATUS.WAITING,
@@ -206,27 +225,48 @@ export class MonitorEngine {
     return this.gateway.getExportData();
   }
 
-  retryNarrative(tokenId, detectedAt) {
-    return this.gateway.retryNarrative(tokenId, detectedAt);
+  retryNarrative(tokenId, detectedAt, force = false) {
+    return this.gateway.retryNarrative(tokenId, detectedAt, force);
   }
 
-  async analyzeTopToken() {
-    const token = await this.getCurrentTopToken();
-    const result = await this.gateway.manualNarrative(token);
-    this.patchState({ events: result.summary.recentEvents });
-    return result.event;
+  async toggleFavorite(token) {
+    const result = await this.gateway.toggleFavorite(token);
+    this.patchState({ favorites: result.favorites });
+    return result.favorited;
   }
 
-  async analyzeContract(rawAddress) {
+  ensureFomoPermission() {
+    return this.gateway.ensureFomoPermission();
+  }
+
+  toggleFomoLive(tokenId, detectedAt, live) {
+    return this.gateway.toggleFomoLive(tokenId, detectedAt, live);
+  }
+
+  refreshFomoOnce(tokenId, detectedAt) {
+    return this.gateway.refreshFomoOnce(tokenId, detectedAt);
+  }
+
+  async analyzeTopToken(force = false, selectedToken = null) {
+    const token = selectedToken || await this.getCurrentTopToken();
+    const result = await this.gateway.manualNarrative(token, force);
+    if (result.summary) this.patchState({ events: result.summary.recentEvents });
+    result.requestToken = token;
+    return result;
+  }
+
+  async analyzeContract(rawAddress, force = false) {
+    // 先在本地校验格式，输错时立刻提示；查记录和定链交给后台，不需要读取热门榜
     const address = parseManualContractAddress(rawAddress);
-    const pageToken = await this.getCurrentTopToken();
-    const token = buildMinimalCaToken(pageToken?.chain, address);
-    const result = await this.gateway.manualNarrative(token);
-    this.patchState({ events: result.summary.recentEvents });
-    return result.event;
+    const result = await this.gateway.manualCaNarrative(address, this.source.getCurrentChain?.() || "", force);
+    if (result.summary) this.patchState({ events: result.summary.recentEvents });
+    return result;
   }
 
   async getCurrentTopToken() {
+    if (this.source.isLeaderboardPage?.() === false) {
+      throw new Error("当前不在热门榜页面，请返回 GMGN 热门榜后再分析");
+    }
     const tokens = await this.source.readTokens({ deep: false });
     const token = tokens.reduce((top, item) => {
       if (!top) return item;

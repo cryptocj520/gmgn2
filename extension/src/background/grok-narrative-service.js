@@ -48,7 +48,7 @@ export class GrokNarrativeService {
         httpErrorMessage(body, response.status, apiKeyFromHeaders(options.headers)),
         response.status,
         normalizeUsage(body?.usage),
-        response.status === 429 || response.status >= 500,
+        response.status === 429,
       );
     } catch (error) {
       if (error instanceof AnalysisError) throw error;
@@ -85,9 +85,10 @@ export class GrokNarrativeService {
 
   toUserError(error, apiKey = "") {
     const status = Number(error?.status) || 0;
-    const retryable = status === 429 || (status >= 500 && status !== 504);
+    const retryable = status === 429;
+    const reason = sanitizeErrorMessage(error?.message || httpErrorMessage({}, status, apiKey), apiKey) || "分析失败";
     const mapped = new AnalysisError(
-      sanitizeErrorMessage(error?.message || httpErrorMessage({}, status, apiKey), apiKey) || "分析失败",
+      !retryable && status >= 500 && status !== 504 ? `${reason}（未自动重试，以免重复消耗额度）` : reason,
       status,
       error?.usage,
       retryable,

@@ -86,8 +86,11 @@ export function extractAiText(protocol, payload) {
   }
   let text = "";
   if (protocol === "openai-responses") {
-    text = payload?.output_text || (payload?.output || []).flatMap((item) => item?.content || [])
-      .filter((item) => item?.type === "output_text").map((item) => item.text).join("\n");
+    // 带检索时模型可能先输出一条占位消息再调用工具，只取最后一条有文本的消息作为最终回答
+    const messageTexts = (payload?.output || []).map((item) => (item?.content || [])
+      .filter((part) => part?.type === "output_text").map((part) => part.text).join("\n"))
+      .filter((value) => value.trim());
+    text = messageTexts.length ? messageTexts[messageTexts.length - 1] : payload?.output_text;
   } else {
     const content = payload?.choices?.[0]?.message?.content;
     text = Array.isArray(content) ? content.map((item) => item?.text || "").join("\n") : content;
@@ -127,11 +130,16 @@ export function extractSearchEvidence(payload) {
         Number(response.server_side_tool_usage?.[key] ?? response.usage?.server_side_tool_usage?.[key]) || 0,
       );
     }
+    // xAI 新版把搜索次数放在 usage.server_side_tool_usage_details 里
+    const details = response.usage?.server_side_tool_usage_details || response.server_side_tool_usage_details;
+    for (const [key, type] of [["web_search_calls", "web"], ["x_search_calls", "x"]]) {
+      usageCounts[type] = Math.max(usageCounts[type], Number(details?.[key]) || 0);
+    }
     (response.citations || []).forEach(addSource);
     items.push(...(response.output || []));
   }
   for (const [index, item] of items.entries()) {
-    const type = item?.type === "web_search_call" ? "web" : item?.type === "x_search_call" ? "x" : null;
+    const type = searchCallType(item);
     if (type && item.status !== "failed") calls.set(item.id || `item-${index}`, type);
     for (const content of item?.content || []) {
       for (const annotation of content?.annotations || []) addSource(annotation);
@@ -142,6 +150,18 @@ export function extractSearchEvidence(payload) {
     xCalls: Math.max(usageCounts.x, [...calls.values()].filter((type) => type === "x").length),
     sources: [...sources].slice(0, 30),
   };
+}
+
+// xAI 的 X 检索以 custom_tool_call 返回，工具名形如 x_keyword_search、x_semantic_search
+const SEARCH_CALL_TYPES = Object.freeze({
+  web_search_call: () => "web",
+  x_search_call: () => "x",
+  custom_tool_call: (item) => (/^x_/i.test(item.name || "") ? "x" : null),
+});
+
+function searchCallType(item) {
+  if (!Object.hasOwn(SEARCH_CALL_TYPES, item?.type)) return null;
+  return SEARCH_CALL_TYPES[item.type](item);
 }
 
 export function extractUsage(payload) {
@@ -175,6 +195,8 @@ function visibleText(value) {
 
 function extractStreamText(protocol, raw) {
   const chunks = [];
+  // Responses 流按消息分段收集：检索前的占位消息和最终消息不能拼在一起
+  const messageChunks = new Map();
   let completedText = "";
   let truncated = false;
   for (const block of raw.split(/\r?\n\r?\n/)) {
@@ -187,8 +209,11 @@ function extractStreamText(protocol, raw) {
       throw new Error(event.error?.message || event.message || "AI 流式请求失败");
     }
     if (protocol === "openai-responses") {
-      if (event.type === "response.output_text.delta") chunks.push(event.delta || "");
-      else if (event.type === "response.completed" && !chunks.length) {
+      if (event.type === "response.output_text.delta") {
+        const messageId = event.item_id ?? event.output_index ?? "default";
+        if (!messageChunks.has(messageId)) messageChunks.set(messageId, []);
+        messageChunks.get(messageId).push(event.delta || "");
+      } else if (event.type === "response.completed" && !messageChunks.size) {
         completedText = extractAiText(protocol, event.response);
       }
       if (event.type === "response.incomplete") truncated = true;
@@ -201,6 +226,8 @@ function extractStreamText(protocol, raw) {
     }
   }
   if (truncated) throw new Error("AI 输出达到最大 Token，未完成分析");
+  const messageTexts = [...messageChunks.values()].map((parts) => parts.join("")).filter((value) => value.trim());
+  if (messageTexts.length) chunks.push(messageTexts[messageTexts.length - 1]);
   const text = visibleText(chunks.join("")) || visibleText(completedText);
   if (!text) throw new Error("AI 流式响应没有最终回答（可能只有思考内容）");
   return text;

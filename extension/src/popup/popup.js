@@ -1,4 +1,6 @@
-import { GMGN_URL, GROK, MESSAGE, MESSAGE_TARGET } from "../shared/constants.js";
+import { GROK, MESSAGE, MESSAGE_TARGET, STORAGE_KEYS } from "../shared/constants.js";
+import { buildTrendUrl } from "../shared/gmgn-navigation.js";
+import { FOMO } from "../fomo/constants.js";
 import {
   normalizeAuthType,
   normalizeGrokApiMode,
@@ -6,21 +8,36 @@ import {
   normalizeGrokModel,
   normalizeTimeoutSeconds,
   permissionPatternForBaseUrl,
+  insecureAiTransportWarning,
 } from "../shared/grok-config.js";
-import { buildMinimalCaToken, formatClock, parseManualContractAddress } from "../shared/token.js";
+import { formatClock, parseManualContractAddress } from "../shared/token.js";
 
 const settingIds = [
   "autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "alertTopN",
-  "intervalSeconds", "connectionTimeoutSeconds", "retentionDays", "narrativeEnabled",
+  "intervalSeconds", "connectionTimeoutSeconds", "retentionDays", "narrativeEnabled", "fomoEnabled",
+  "maxConcurrentAnalyses", "minLiquidity", "minHolders", "minMarketCap",
 ];
 const elements = Object.fromEntries([
-  ...settingIds, "seenCount", "eventCount", "updatedAt", "testSound", "openGmgn", "message",
+  ...settingIds, "seenCount", "eventCount", "updatedAt", "testSound", "openGmgn", "message", "transportWarning",
   "analyzerStatus", "grokBaseUrl", "grokModelInput", "grokApiMode", "grokAuthType", "timeoutSeconds",
   "enableWebSearch", "enableXSearch", "grokApiKey", "toggleKey",
   "saveAnalyzer", "testAnalyzer", "manualTopNarrative", "manualCaAddress", "manualCaNarrative", "openSettingsTab",
 ].map((id) => [id, document.getElementById(id)]));
 let currentSettings = null;
 let currentAiConfig = null;
+const recentConfirmations = new Map();
+const RECENT_CONFIRMATION_MS = 10000;
+
+function takeRecentConfirmation(button, key) {
+  const pending = recentConfirmations.get(button);
+  recentConfirmations.delete(button);
+  return Boolean(pending && pending.key === key && Date.now() < pending.until);
+}
+
+function showRecentAnalysisPrompt(button, key) {
+  recentConfirmations.set(button, { key, until: Date.now() + RECENT_CONFIRMATION_MS });
+  showMessage(`该代币 ${GROK.RECENT_ANALYSIS_HOURS} 小时内已分析过，结果在 GMGN 面板查看；再点一次将重新分析`);
+}
 
 async function request(type, payload = {}) {
   try {
@@ -46,21 +63,22 @@ function render(bootstrap) {
   const { settings, summary, integrations, aiConfig } = bootstrap;
   currentSettings = settings;
   currentAiConfig = aiConfig || integrations;
-  for (const id of ["autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "narrativeEnabled"]) {
+  for (const id of ["autoStart", "sound", "desktopNotifications", "autoRefreshOnStall", "narrativeEnabled", "fomoEnabled"]) {
     elements[id].checked = settings[id];
   }
   elements.alertTopN.value = String(settings.alertTopN);
   elements.intervalSeconds.value = String(settings.intervalSeconds);
   elements.connectionTimeoutSeconds.value = String(settings.connectionTimeoutSeconds);
   elements.retentionDays.value = String(settings.retentionDays);
-  const configured = Boolean(currentAiConfig.configured || currentAiConfig.grokConfigured);
-  elements.grokBaseUrl.value = configured
-    ? (currentAiConfig.grokBaseUrl || GROK.API_BASE_URL)
-    : GROK.API_BASE_URL;
+  for (const id of ["maxConcurrentAnalyses", "minLiquidity", "minHolders", "minMarketCap"]) {
+    elements[id].value = String(settings[id]);
+  }
+  elements.grokBaseUrl.value = currentAiConfig.grokBaseUrl || "";
+  updateTransportWarning();
   elements.grokModelInput.value = currentAiConfig.grokModel || GROK.MODEL;
   elements.grokApiMode.value = currentAiConfig.apiMode || "openai-responses";
   elements.grokAuthType.value = currentAiConfig.authType || "auto";
-  elements.timeoutSeconds.value = String(currentAiConfig.timeoutSeconds || 180);
+  elements.timeoutSeconds.value = String(currentAiConfig.timeoutSeconds || GROK.DEFAULT_TIMEOUT_SECONDS);
   elements.enableWebSearch.checked = currentAiConfig.enableWebSearch !== false;
   elements.enableXSearch.checked = currentAiConfig.enableXSearch !== false;
   elements.seenCount.textContent = String(summary.totalSeen);
@@ -68,6 +86,14 @@ function render(bootstrap) {
   elements.updatedAt.textContent = summary.updatedAt ? formatClock(summary.updatedAt).slice(0, 5) : "--:--";
   renderIntegration(currentAiConfig);
 }
+
+function updateTransportWarning() {
+  const warning = insecureAiTransportWarning(elements.grokBaseUrl.value);
+  elements.transportWarning.textContent = warning;
+  elements.transportWarning.hidden = !warning;
+}
+
+elements.grokBaseUrl.addEventListener("input", updateTransportWarning);
 
 function renderIntegration(integration) {
   currentAiConfig = { ...currentAiConfig, ...integration };
@@ -79,9 +105,18 @@ function renderIntegration(integration) {
 
 settingIds.forEach((id) => {
   elements[id].addEventListener("change", async () => {
-    const numeric = ["alertTopN", "intervalSeconds", "connectionTimeoutSeconds", "retentionDays"].includes(id);
+    const numeric = ["alertTopN", "intervalSeconds", "connectionTimeoutSeconds", "retentionDays",
+      "maxConcurrentAnalyses", "minLiquidity", "minHolders", "minMarketCap"].includes(id);
     try {
-      await request(MESSAGE.UPDATE_SETTINGS, { patch: { [id]: numeric ? Number(elements[id].value) : elements[id].checked } });
+      if (id === "fomoEnabled" && elements.fomoEnabled.checked) {
+        const granted = await chrome.permissions.request({ origins: [FOMO.RPC_PERMISSION] });
+        if (!granted) {
+          elements.fomoEnabled.checked = false;
+          throw new Error("未获得 Robinhood 节点访问权限");
+        }
+      }
+      currentSettings = await request(MESSAGE.UPDATE_SETTINGS, { patch: { [id]: numeric ? Number(elements[id].value) : elements[id].checked } });
+      if (numeric) elements[id].value = String(currentSettings[id]);
       showMessage("设置已保存");
     } catch (error) {
       showMessage(error.message, true);
@@ -248,8 +283,14 @@ elements.manualTopNarrative.addEventListener("click", async () => {
   showMessage("正在读取 GMGN 当前榜首…");
   try {
     const token = await readCurrentPageTopToken();
-    await request(MESSAGE.MANUAL_NARRATIVE, { token });
-    showMessage(`已发送 ${token.symbol || "榜首代币"}，结果将在 GMGN 面板显示`);
+    const key = token.id;
+    const force = takeRecentConfirmation("top", key);
+    const { alreadyInProgress, recentAnalysis } = await request(MESSAGE.MANUAL_NARRATIVE, { token, force });
+    if (recentAnalysis) {
+      showRecentAnalysisPrompt("top", key);
+      return;
+    }
+    showMessage(alreadyInProgress ? "该代币正在分析中，结果将在 GMGN 面板显示" : `已发送 ${token.symbol || "榜首代币"}，结果将在 GMGN 面板显示`);
   } catch (error) {
     showMessage(error.message || "手动分析失败", true);
   } finally {
@@ -266,12 +307,16 @@ elements.manualCaNarrative.addEventListener("click", async () => {
     return;
   }
   setNarrativeActionsDisabled(true);
-  showMessage("正在读取当前页面链信息…");
+  showMessage("正在提交分析…");
   try {
-    const pageToken = await readCurrentPageTopToken();
-    const token = buildMinimalCaToken(pageToken?.chain, address);
-    await request(MESSAGE.MANUAL_NARRATIVE, { token });
-    showMessage(`已发送 ${token.symbol || "该合约"}，结果将在 GMGN 面板显示`);
+    // 后台先查本地已见记录，查不到再按地址格式和上次浏览的链定链，不需要打开热门榜
+    const force = takeRecentConfirmation("ca", address);
+    const { event, alreadyInProgress, recentAnalysis } = await request(MESSAGE.MANUAL_CA_NARRATIVE, { address, force });
+    if (recentAnalysis) {
+      showRecentAnalysisPrompt("ca", address);
+      return;
+    }
+    showMessage(alreadyInProgress ? "该代币正在分析中，结果将在 GMGN 面板显示" : `已发送 ${event?.symbol || "该合约"}，结果将在 GMGN 面板显示`);
   } catch (error) {
     showMessage(error.message || "手动分析失败", true);
   } finally {
@@ -294,6 +339,13 @@ elements.testSound.addEventListener("click", async () => {
   }
 });
 
-elements.openGmgn.addEventListener("click", () => chrome.tabs.create({ url: GMGN_URL }));
+elements.openGmgn.addEventListener("click", async () => {
+  try {
+    const stored = await chrome.storage.local.get(STORAGE_KEYS.LAST_CHAIN);
+    await chrome.tabs.create({ url: buildTrendUrl(stored[STORAGE_KEYS.LAST_CHAIN]) });
+  } catch (error) {
+    showMessage(error.message || "打开 GMGN 失败", true);
+  }
+});
 
 request(MESSAGE.GET_BOOTSTRAP).then(render).catch((error) => showMessage(error.message, true));
