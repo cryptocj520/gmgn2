@@ -16,7 +16,7 @@ export async function analyzeToken(token, config, requestImpl) {
   try {
     const request = buildAiRequest(
       config,
-      `${systemPrompt()}\n\n${userPrompt(token)}`,
+      `${systemPrompt()}\n${searchInstruction(config)}\n\n${userPrompt(token)}`,
       GROK.MAX_OUTPUT_TOKENS,
       { jsonSchema: structuredTextFormat(), jsonObject: true },
     );
@@ -28,7 +28,7 @@ export async function analyzeToken(token, config, requestImpl) {
         httpErrorMessage(payload, response.status, config.apiKey),
         response.status,
         usage,
-        response.status === 429 || response.status >= 500,
+        response.status === 429,
       );
     }
     const text = extractAiText(config.apiMode, payload);
@@ -36,14 +36,19 @@ export async function analyzeToken(token, config, requestImpl) {
       throw new AnalysisError("模型只返回了搜索计划，未给出最终回答", 502, usage);
     }
     let sources = [];
+    let xSearched = false;
+    let missingSearchEvidence = false;
     if (isSearchEnabled(config)) {
       const search = extractSearchEvidence(payload);
-      if (!search.webCalls && !search.xCalls) {
-        throw new AnalysisError("中转站没有返回 Web/X 搜索调用证据；请确认 Grok Responses 工具已透传", 502, usage);
-      }
+      missingSearchEvidence = !search.webCalls && !search.xCalls;
       sources = search.sources;
+      xSearched = search.xCalls > 0;
     }
-    const analysis = sanitizeTextUrls(validateAnalysis(parseAnalysis(text)));
+    const analysis = withXSearchEvidence(
+      sanitizeTextUrls(validateAnalysis(parseAnalysis(text))),
+      xSearched,
+      missingSearchEvidence,
+    );
     return {
       analysis: normalizeAnalysis(analysis, sources, config.grokModel),
       usage,
@@ -73,7 +78,7 @@ export async function testAiConnection(config, requestImpl) {
       httpErrorMessage(payload, response.status, config.apiKey),
       response.status,
       usage,
-      response.status === 429 || response.status >= 500,
+      response.status === 429,
     );
   }
   const text = extractAiText(config.apiMode, payload);
@@ -150,10 +155,33 @@ function systemPrompt() {
   ].join("\n");
 }
 
+// 模型有时只做网页搜索就跳过 X，这里按已启用的工具明确要求检索顺序
+function searchInstruction(config) {
+  if (!isSearchEnabled(config)) return "本次未启用联网检索：x_sentiment.search_status 必须为 unavailable，正负面数组留空。";
+  if (config.enableXSearch === false) return "本次未启用 X 检索：x_sentiment.search_status 必须为 unavailable，正负面数组留空。";
+  return "必须先调用 x_search 检索该代币在 X 上的真实帖子（至少一次），再用 web_search 核对背景；没有实际调用 x_search 就不能填写 X 舆情。";
+}
+
+// 以接口返回的真实调用记录为准：没有实际检索 X，就不展示模型给出的 X 观点
+function withXSearchEvidence(analysis, xSearched, missingSearchEvidence = false) {
+  if (xSearched) return analysis;
+  return {
+    ...analysis,
+    x_sentiment: {
+      ...(analysis.x_sentiment || {}),
+      search_status: "unavailable",
+      overview: missingSearchEvidence ? "本次未拿到检索调用记录，不展示 X 舆情。" : "本次分析没有实际调用 X 检索，不展示 X 舆情；可稍后点重新分析。",
+      positive: [],
+      negative: [],
+    },
+  };
+}
+
 function userPrompt(token) {
   const publicToken = {
-    symbol: token.symbol,
-    name: token.name,
+    // 手动 CA 的名称只是截短地址，传给模型会被当成关键词去搜
+    symbol: token.nameUnknown ? null : token.symbol,
+    name: token.nameUnknown ? null : token.name,
     chain: token.chain,
     contract: token.address,
     gmgn_url: token.url,
@@ -175,7 +203,9 @@ function userPrompt(token) {
   };
   return [
     "请围绕代币故事和 X 上的真实讨论完成研究。先用合约地址、名称、符号和公开账号交叉搜索，避免同名代币混淆。",
+    ...(token.nameUnknown ? ["名称和符号未知：先用合约地址查出它的真实名称和符号，再围绕它研究。"] : []),
     "返回 JSON：",
+    "token_identity={name,symbol}：该合约代币的真实名称和符号，查不到就填空字符串；",
     "story={headline,one_line,origin,key_people_or_event,why_now,timeline:[{time,event,url}]}；",
     "x_sentiment={search_status:verified|partial|unavailable,searched_at,overview,positive:[{author,handle,view,quote,url,engagement}],negative:[同结构]}；",
     "story.timeline 最多2条；x_sentiment 的 positive 和 negative 各最多1条；",
@@ -216,6 +246,12 @@ function structuredTextFormat() {
         type: "object",
         additionalProperties: false,
         properties: {
+          token_identity: {
+            type: "object",
+            additionalProperties: false,
+            properties: { name: text(60), symbol: text(30) },
+            required: ["name", "symbol"],
+          },
           story: {
             type: "object",
             additionalProperties: false,
@@ -277,7 +313,7 @@ function structuredTextFormat() {
           sources: { type: "array", maxItems: 4, items: text(240) },
         },
         required: [
-          "story", "x_sentiment", "verification", "continuation",
+          "token_identity", "story", "x_sentiment", "verification", "continuation",
           "market_context", "risks", "tags", "confidence", "sources",
         ],
       },
@@ -307,42 +343,30 @@ function parseAnalysis(text) {
 }
 
 function validateAnalysis(value) {
-  const violation = schemaViolation(value, structuredTextFormat().format.schema);
-  if (violation) throw new AnalysisError(`中转返回的分析结果不符合格式：${violation}`, 502);
-  return value;
+  if (!value || typeof value !== "object" || Array.isArray(value) || !value.story || typeof value.story !== "object" || Array.isArray(value.story)) {
+    throw new AnalysisError("中转返回的分析结果缺少故事内容", 502);
+  }
+  for (const key of ["headline", "one_line", "origin"]) {
+    if (typeof value.story[key] !== "string" || !value.story[key].trim()) {
+      throw new AnalysisError(`中转返回的分析结果缺少故事字段：${key}`, 502);
+    }
+  }
+  return repairAnalysis(value, structuredTextFormat().format.schema);
 }
 
-function schemaViolation(value, schema, path = "result") {
-  if (schema.enum && !schema.enum.includes(value)) return `${path} 不在允许值中`;
+function repairAnalysis(value, schema) {
   if (schema.type === "string") {
-    if (typeof value !== "string") return `${path} 必须是文本`;
-    if (schema.maxLength && value.length > schema.maxLength) return `${path} 超过长度限制`;
-    return "";
+    if (schema.enum && !schema.enum.includes(value)) return schema.enum.at(-1);
+    return typeof value === "string" ? value.slice(0, schema.maxLength || undefined) : "";
   }
   if (schema.type === "array") {
-    if (!Array.isArray(value)) return `${path} 必须是数组`;
-    if (schema.maxItems && value.length > schema.maxItems) return `${path} 超过数量限制`;
-    for (let index = 0; index < value.length; index += 1) {
-      const violation = schemaViolation(value[index], schema.items, `${path}[${index}]`);
-      if (violation) return violation;
-    }
-    return "";
+    return Array.isArray(value) ? value.slice(0, schema.maxItems).map((item) => repairAnalysis(item, schema.items)) : [];
   }
   if (schema.type === "object") {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return `${path} 必须是对象`;
-    const missing = (schema.required || []).find((key) => !Object.hasOwn(value, key));
-    if (missing) return `${path}.${missing} 缺失`;
-    if (schema.additionalProperties === false) {
-      const extra = Object.keys(value).find((key) => !Object.hasOwn(schema.properties || {}, key));
-      if (extra) return `${path}.${extra} 不允许出现`;
-    }
-    for (const [key, childSchema] of Object.entries(schema.properties || {})) {
-      if (!Object.hasOwn(value, key)) continue;
-      const violation = schemaViolation(value[key], childSchema, `${path}.${key}`);
-      if (violation) return violation;
-    }
+    const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return Object.fromEntries(Object.entries(schema.properties || {}).map(([key, child]) => [key, repairAnalysis(source[key], child)]));
   }
-  return "";
+  return value;
 }
 
 function sanitizeTextUrls(value) {
@@ -376,6 +400,10 @@ function normalizeAnalysis(value, annotationSources, model) {
     ...story.timeline.map((item) => item.url),
   ].map(safeUrl).filter(Boolean))].slice(0, 8);
   return {
+    tokenIdentity: {
+      name: String(analysis.token_identity?.name || "").trim().slice(0, 60),
+      symbol: String(analysis.token_identity?.symbol || "").trim().slice(0, 30),
+    },
     title: story.headline,
     summary: story.oneLine,
     narrative: story.origin,

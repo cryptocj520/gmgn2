@@ -1,10 +1,13 @@
-import { DATA_SCHEMA_VERSION, DEFAULT_SETTINGS, GROK, LIMITS, STORAGE_KEYS } from "../shared/constants.js";
-import { applyScanToState, createDataState } from "../shared/scan-state.js";
+import { DEFAULT_SETTINGS, GROK, LIMITS, STORAGE_KEYS } from "../shared/constants.js";
+import { normalizeTrendChain } from "../shared/gmgn-navigation.js";
+import { applyScanToState, compactTokenRecord, createDataState } from "../shared/scan-state.js";
 import { normalizePanelPosition, normalizePanelSize } from "../shared/panel-preferences.js";
+import { ConfidenceStore } from "./confidence-store.js";
 
 export class DataRepository {
   constructor(storageArea = chrome.storage.local) {
     this.storage = storageArea;
+    this.confidenceStore = new ConfidenceStore(storageArea);
     this.data = createDataState();
     this.settings = { ...DEFAULT_SETTINGS };
     this.integrations = {
@@ -15,6 +18,8 @@ export class DataRepository {
     this.requiresBaseline = true;
     this.ready = null;
     this.writeQueue = Promise.resolve();
+    this.persistedData = this.data;
+    this.lastChain = "";
   }
 
   initialize() {
@@ -27,15 +32,20 @@ export class DataRepository {
       STORAGE_KEYS.DATA,
       STORAGE_KEYS.SETTINGS,
       STORAGE_KEYS.INTEGRATIONS,
+      STORAGE_KEYS.LAST_CHAIN,
     ]);
     const storedData = stored[STORAGE_KEYS.DATA];
+    this.lastChain = normalizeTrendChain(stored[STORAGE_KEYS.LAST_CHAIN]);
     this.requiresBaseline = !storedData ||
-      storedData.schemaVersion !== DATA_SCHEMA_VERSION ||
       Object.keys(storedData.tokens || {}).length === 0;
     this.data = {
       ...createDataState(),
       ...(storedData || {}),
-      tokens: storedData?.tokens || {},
+      tokens: Object.fromEntries(Object.entries(storedData?.tokens || {}).map(([id, token]) => [id, {
+        ...compactTokenRecord(token),
+        // 旧版没有持续更新 lastSeen，迁移时用最近抓取时间，缺失时给一个完整保留期。
+        lastSeen: token.lastSeen ?? token.capturedAt ?? Date.now(),
+      }])),
       events: storedData?.events || [],
       narrativeJobs: storedData?.narrativeJobs || {},
     };
@@ -47,6 +57,7 @@ export class DataRepository {
       grokModel: stored[STORAGE_KEYS.INTEGRATIONS]?.grokModel || GROK.MODEL,
       grokBaseUrl: stored[STORAGE_KEYS.INTEGRATIONS]?.grokBaseUrl || GROK.API_BASE_URL,
     };
+    if (storedData) await this.confidenceStore.initialize(this.data.events);
   }
 
   async getBootstrap() {
@@ -61,6 +72,7 @@ export class DataRepository {
   async processScan(tokens, options = {}) {
     await this.initialize();
     const operation = async () => {
+      await this.rememberTrendChain(options.chain);
       const result = applyScanToState(this.data, tokens, {
         baseline: options.baseline,
         completeSnapshot: options.completeSnapshot,
@@ -68,14 +80,25 @@ export class DataRepository {
         maxEvents: LIMITS.MAX_EVENTS,
         retentionDays: this.settings.retentionDays,
         alertTopN: this.settings.alertTopN,
+        minLiquidity: this.settings.minLiquidity,
+        minHolders: this.settings.minHolders,
+        minMarketCap: this.settings.minMarketCap,
       });
       this.data = result.state;
-      if (options.baseline && options.completeSnapshot && tokens.length) this.requiresBaseline = false;
-      await this.storage.set({ [STORAGE_KEYS.DATA]: this.data });
+      if (options.baseline && tokens.length) this.requiresBaseline = false;
+      await this.persistData();
       return result.report;
     };
     this.writeQueue = this.writeQueue.then(operation, operation);
     return this.writeQueue;
+  }
+
+  async rememberTrendChain(value) {
+    await this.initialize();
+    const chain = normalizeTrendChain(value);
+    if (!chain || chain === this.lastChain) return;
+    await this.storage.set({ [STORAGE_KEYS.LAST_CHAIN]: chain });
+    this.lastChain = chain;
   }
 
   async updateSettings(patch) {
@@ -114,6 +137,7 @@ export class DataRepository {
     if (Object.hasOwn(allowed, "panelPosition")) {
       allowed.panelPosition = normalizePanelPosition(allowed.panelPosition);
     }
+    Object.assign(allowed, normalizeExtraSettings(allowed));
     this.settings = { ...this.settings, ...allowed };
     await this.storage.set({
       [STORAGE_KEYS.SETTINGS]: this.settings,
@@ -141,41 +165,51 @@ export class DataRepository {
     return { ...this.integrations };
   }
 
-  async queueNarratives(tokens) {
+  async queueNarratives(tokens, { manual = false, checkRecent = false, force = false } = {}) {
     await this.initialize();
+    const confidenceGroup = checkRecent && !force ? await this.confidenceStore.list() : [];
     return this.runDataWrite(() => {
       const now = Date.now();
       const jobs = { ...this.data.narrativeJobs };
       const jobIds = [];
       const jobByToken = new Map();
-      const existingJobByToken = new Map(Object.values(jobs).map((job) => [
-        `${job.token.id}:${job.token.detectedAt}`,
-        job.jobId,
-      ]));
+      const existingJobByToken = new Map(Object.values(jobs).map((job) => [job.token.id, job]));
+      let selectedEvent = null;
+      let alreadyInProgress = false;
+      let events = this.data.events;
+      if (checkRecent && !force && tokens.length === 1 && !existingJobByToken.has(tokens[0].id)) {
+        const recentAnalysis = findRecentAnalysis(tokens[0], events, Object.values(this.data.tokens), confidenceGroup, now);
+        if (recentAnalysis) return { recentAnalysis };
+      }
 
       tokens.forEach((token, index) => {
-        const tokenKey = `${token.id}:${token.detectedAt}`;
-        const existingJobId = existingJobByToken.get(tokenKey);
-        if (existingJobId) {
-          jobIds.push(existingJobId);
-          jobByToken.set(tokenKey, existingJobId);
+        const existingJob = existingJobByToken.get(token.id);
+        if (existingJob) {
+          alreadyInProgress = true;
+          selectedEvent ||= events.find((item) => item.id === token.id && item.detectedAt === existingJob.token.detectedAt) || existingJob.token;
           return;
         }
+        const event = manual ? { ...token, detectedAt: now, manual: true } : token;
+        if (manual) events = [event, ...events].slice(0, LIMITS.MAX_EVENTS);
+        const tokenKey = `${event.id}:${event.detectedAt}`;
         const jobId = `${now}-${index}-${token.id}`;
-        jobs[jobId] = { jobId, token, attempts: 0, status: "queued", leaseUntil: 0, createdAt: now };
+        jobs[jobId] = { jobId, token: event, attempts: 0, status: "queued", leaseUntil: 0, createdAt: now };
         jobIds.push(jobId);
         jobByToken.set(tokenKey, jobId);
-        existingJobByToken.set(tokenKey, jobId);
+        existingJobByToken.set(token.id, jobs[jobId]);
+        selectedEvent ||= event;
       });
 
-      const events = this.data.events.map((event) => {
+      if (!jobIds.length) return { jobIds, event: selectedEvent, alreadyInProgress, summary: this.getSummary() };
+      events = events.map((event) => {
         const jobId = jobByToken.get(`${event.id}:${event.detectedAt}`);
         return jobId
           ? { ...event, narrative: { status: "queued", jobId, updatedAt: now } }
           : event;
       });
       this.data = { ...this.data, events, narrativeJobs: jobs, updatedAt: now };
-      return { jobIds, summary: this.getSummary() };
+      selectedEvent = events.find((event) => event.id === selectedEvent?.id && event.detectedAt === selectedEvent?.detectedAt) || selectedEvent;
+      return { jobIds, event: selectedEvent, alreadyInProgress, summary: this.getSummary() };
     });
   }
 
@@ -193,11 +227,27 @@ export class DataRepository {
     });
   }
 
+  // 手动分析指定 CA 时，用榜单上见过的记录补全名称、链和行情；同一地址出现在多条链时取最近见到的
+  async findSeenToken(address) {
+    await this.initialize();
+    // 已见表里的 0x 地址统一存成小写，查找时同样转小写
+    const target = /^0x/i.test(address) ? address.toLowerCase() : address;
+    const matches = Object.values(this.data.tokens).filter((token) => token.address === target);
+    const latest = matches.sort((left, right) => (right.lastSeen || 0) - (left.lastSeen || 0))[0];
+    if (!latest) return null;
+    // 去掉已见表自己的记账字段和旧分析结果，只保留代币本身的信息
+    const {
+      firstSeen, lastSeen, lastAppearedAt, missingSince, baseline, alertedAt, rank, narrative, ...token
+    } = latest;
+    return token;
+  }
+
   async markNarrativesWaitingForKey(tokens) {
     await this.initialize();
     return this.runDataWrite(() => {
       const now = Date.now();
-      const targets = new Set(tokens.map((token) => `${token.id}:${token.detectedAt}`));
+      const activeIds = new Set(Object.values(this.data.narrativeJobs).map((job) => job.token.id));
+      const targets = new Set(tokens.filter((token) => !activeIds.has(token.id)).map((token) => `${token.id}:${token.detectedAt}`));
       const events = this.data.events.map((event) => targets.has(`${event.id}:${event.detectedAt}`)
         ? { ...event, narrative: { status: "waiting_key", updatedAt: now } }
         : event
@@ -217,6 +267,17 @@ export class DataRepository {
     return Object.values(this.data.narrativeJobs);
   }
 
+  async getActiveNarrative(tokenId) {
+    await this.initialize();
+    await this.writeQueue.catch(() => undefined);
+    const job = Object.values(this.data.narrativeJobs).find((item) => item.token.id === tokenId);
+    if (!job) return null;
+    const event = this.data.events.find((item) => item.id === tokenId && item.detectedAt === job.token.detectedAt) || {
+      ...job.token, narrative: { status: job.attempts ? "retrying" : "queued", jobId: job.jobId },
+    };
+    return { event, summary: this.getSummary(), alreadyInProgress: true };
+  }
+
   async getWaitingNarrativeEvents() {
     await this.initialize();
     return this.data.events.filter((event) => event.narrative?.status === "waiting_key");
@@ -227,23 +288,54 @@ export class DataRepository {
     return this.runDataWrite(() => {
       const job = this.data.narrativeJobs[jobId];
       if (!job) return { claimed: false, job: null, retryAt: 0 };
-      const active = Object.values(this.data.narrativeJobs).find((candidate) =>
+      if (Number(job.nextAttemptAt) > now) return { claimed: false, job, retryAt: Number(job.nextAttemptAt) };
+      const active = Object.values(this.data.narrativeJobs).filter((candidate) =>
         candidate.status === "processing" && Number(candidate.leaseUntil) > now
       );
-      if (active) return { claimed: false, job, retryAt: Number(active.leaseUntil) };
+      const duplicate = active.find(candidate => candidate.jobId === jobId);
+      if (duplicate || active.length >= this.settings.maxConcurrentAnalyses) {
+        const retryAt = duplicate ? Number(duplicate.leaseUntil) : Math.min(...active.map(candidate => Number(candidate.leaseUntil)));
+        return { claimed: false, job, retryAt };
+      }
 
       const updatedJob = {
         ...job,
         status: "processing",
         leaseUntil: now + leaseMs,
         startedAt: now,
+        nextAttemptAt: 0,
       };
+      const events = this.updateEventNarrative(updatedJob, {
+        status: "processing",
+        jobId,
+        updatedAt: now,
+      });
       this.data = {
         ...this.data,
+        events,
         narrativeJobs: { ...this.data.narrativeJobs, [jobId]: updatedJob },
         updatedAt: now,
       };
       return { claimed: true, job: updatedJob, retryAt: 0 };
+    });
+  }
+
+  async listEvents() {
+    await this.initialize();
+    return [...this.data.events];
+  }
+
+  async patchEvents(tokens, patch) {
+    await this.initialize();
+    return this.runDataWrite(() => {
+      const now = Date.now();
+      const keys = new Set((tokens || []).map((token) => `${token.id}:${token.detectedAt}`));
+      const events = this.data.events.map((event) => keys.has(`${event.id}:${event.detectedAt}`)
+        ? { ...event, ...patch }
+        : event
+      );
+      this.data = { ...this.data, events, updatedAt: now };
+      return this.getSummary();
     });
   }
 
@@ -263,6 +355,7 @@ export class DataRepository {
         status: "queued",
         leaseUntil: 0,
         lastError: errorMessage,
+        nextAttemptAt: Date.now() + GROK.RETRY_DELAY_MS,
       };
       const narrativeJobs = { ...this.data.narrativeJobs, [jobId]: updatedJob };
       const events = this.updateEventNarrative(job, {
@@ -278,11 +371,13 @@ export class DataRepository {
 
   async completeNarrativeJob(jobId, analysis) {
     await this.initialize();
-    return this.runDataWrite(() => {
+    return this.runDataWrite(async () => {
       const job = this.data.narrativeJobs[jobId];
       if (!job) return this.getSummary();
       const narrative = { status: "ready", analysis, updatedAt: Date.now() };
       const events = this.updateEventNarrative(job, narrative);
+      const event = events.find((item) => item.id === job.token.id && item.detectedAt === job.token.detectedAt);
+      await this.confidenceStore.update({ ...job.token, ...event, ...identifiedName(event || job.token, analysis), narrative });
       const tokens = this.data.tokens[job.token.id]
         ? {
             ...this.data.tokens,
@@ -332,9 +427,9 @@ export class DataRepository {
   async cancelNarrativeJobs(reason = "自动叙事分析已关闭") {
     await this.initialize();
     return this.runDataWrite(() => {
-      const pendingIds = new Set(Object.values(this.data.narrativeJobs).map((job) => job.token.id));
+      const pendingIds = new Set(Object.values(this.data.narrativeJobs).map((job) => `${job.token.id}:${job.token.detectedAt}`));
       const events = this.data.events.map((event) => {
-        const queued = pendingIds.has(event.id);
+        const queued = pendingIds.has(`${event.id}:${event.detectedAt}`) && event.narrative?.status !== "ready";
         const waiting = event.narrative?.status === "waiting_key";
         return queued || waiting
           ? { ...event, narrative: { status: "cancelled", error: reason, updatedAt: Date.now() } }
@@ -348,19 +443,26 @@ export class DataRepository {
   updateEventNarrative(job, narrative) {
     return this.data.events.map((event) =>
       event.id === job.token.id && event.detectedAt === job.token.detectedAt
-        ? { ...event, narrative }
+        ? { ...event, ...identifiedName(event, narrative.analysis), narrative }
         : event
     );
   }
 
   runDataWrite(operation) {
     const task = async () => {
-      const result = operation();
-      await this.storage.set({ [STORAGE_KEYS.DATA]: this.data });
+      const result = await operation();
+      await this.persistData();
       return result;
     };
     this.writeQueue = this.writeQueue.then(task, task);
     return this.writeQueue;
+  }
+
+  async persistData() {
+    if (this.data === this.persistedData) return;
+    const snapshot = this.data;
+    await this.storage.set({ [STORAGE_KEYS.DATA]: snapshot });
+    this.persistedData = snapshot;
   }
 
   async getExportData() {
@@ -388,9 +490,57 @@ export class DataRepository {
   }
 }
 
+function findRecentAnalysis(token, events, tokens, confidenceGroup, now) {
+  const names = (item) => item.nameUnknown ? [] : [item.symbol, item.name].map((value) => String(value || "").replace(/\s+/g, "").toLowerCase()).filter(Boolean);
+  const targetNames = new Set(names(token));
+  const candidates = [
+    ...events.map((event) => ({ event, snapshot: false })),
+    ...tokens.map((event) => ({ event, snapshot: true })),
+    ...confidenceGroup.map((event) => ({ event, snapshot: true })),
+  ];
+  let latest = null;
+  for (const candidate of candidates) {
+    const event = candidate.event;
+    if (event.narrative?.status !== "ready") continue;
+    const analyzedAt = Number(event.narrative.analysis?.analyzedAt) || Date.parse(event.narrative.analysis?.analyzedAt) || 0;
+    const ageMs = now - analyzedAt;
+    if (ageMs < 0 || ageMs > GROK.RECENT_ANALYSIS_HOURS * 3600000) continue;
+    const sameId = event.id === token.id;
+    if (!sameId && !names(event).some((name) => targetNames.has(name))) continue;
+    if (latest && latest.ageMs <= ageMs) continue;
+    latest = { event: candidate.snapshot ? { ...event, detectedAt: event.detectedAt || analyzedAt, favoriteOnly: true } : event, ageMs, sameName: !sameId };
+  }
+  return latest;
+}
+
 function pickMonitorSettings(value = {}) {
-  return Object.keys(DEFAULT_SETTINGS).reduce((next, key) => {
+  const settings = Object.keys(DEFAULT_SETTINGS).reduce((next, key) => {
     next[key] = Object.hasOwn(value, key) ? value[key] : DEFAULT_SETTINGS[key];
     return next;
   }, {});
+  return { ...settings, ...normalizeExtraSettings(settings) };
+}
+
+function normalizeExtraSettings(value) {
+  const rules = {
+    maxConcurrentAnalyses: [LIMITS.MIN_CONCURRENT_ANALYSES, LIMITS.MAX_CONCURRENT_ANALYSES, true],
+    minLiquidity: [0, Number.MAX_SAFE_INTEGER, false],
+    minHolders: [0, Number.MAX_SAFE_INTEGER, true],
+    minMarketCap: [0, Number.MAX_SAFE_INTEGER, false],
+  };
+  const result = {};
+  for (const [key, [minimum, maximum, integer]] of Object.entries(rules)) {
+    if (!Object.hasOwn(value, key)) continue;
+    const number = Number(value[key]);
+    const safe = Number.isFinite(number) ? number : DEFAULT_SETTINGS[key];
+    result[key] = Math.min(maximum, Math.max(minimum, integer ? Math.floor(safe) : safe));
+  }
+  return result;
+}
+
+// 手动 CA 只有截短地址当名称；分析出真实名称后替换掉，面板上才能看出是哪个币
+function identifiedName(event, analysis) {
+  const identity = analysis?.tokenIdentity;
+  if (!event.nameUnknown || !identity?.name) return {};
+  return { name: identity.name, symbol: identity.symbol || identity.name, nameUnknown: false };
 }

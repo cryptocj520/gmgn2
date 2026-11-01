@@ -24,8 +24,18 @@ export class ConnectionWatchdog {
 
     const historyChanged = this.trimReloadHistory(now);
     const online = this.isOnline();
+    if (!connection.available) {
+      clearTimeout(this.reloadTimer);
+      this.reloadTimer = 0;
+      const changed = this.state.unhealthySince != null;
+      this.state.unhealthySince = null;
+      if (changed || historyChanged) this.saveState();
+      return { status: online ? "unavailable" : "offline", connection };
+    }
     const healthy = online && connection.available && connection.healthy;
     if (healthy) {
+      clearTimeout(this.reloadTimer);
+      this.reloadTimer = 0;
       const recovered = this.state.unhealthySince != null || this.state.blocked;
       this.state.unhealthySince = null;
       this.state.blocked = false;

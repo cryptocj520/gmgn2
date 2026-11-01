@@ -12,7 +12,27 @@ export const DEFAULT_AI_CONFIG = Object.freeze({
 
 export function isLoopbackHost(hostname) {
   const host = String(hostname || "").trim().toLowerCase().replace(/^\[|\]$/g, "");
-  return host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "0:0:0:0:0:0:0:1";
+  return host === "localhost" || host.endsWith(".localhost") || /^127(?:\.\d{1,3}){3}$/.test(host) ||
+    host === "::1" || host === "0:0:0:0:0:0:0:1";
+}
+
+export function insecureAiTransportWarning(value) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch (_) {
+    return "";
+  }
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  const octets = host.split(".").map(Number);
+  const privateIpv4 = octets.length === 4 && octets.every(part => Number.isInteger(part) && part >= 0 && part <= 255) &&
+    (octets[0] === 10 || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] === 192 && octets[1] === 168) || (octets[0] === 169 && octets[1] === 254));
+  const local = isLoopbackHost(host) || privateIpv4 || host.endsWith(".local") ||
+    (host.includes(":") && /^(?:f[cd]|fe[89ab])/i.test(host));
+  return url.protocol === "http:" && !local
+    ? "警告：此 HTTP 地址不是本机或局域网地址，API Key 将以明文传输。建议使用 HTTPS；仍可继续保存和连接。"
+    : "";
 }
 
 export function normalizeGrokBaseUrl(value) {
@@ -115,8 +135,9 @@ export function publicAiConfig(config = {}) {
 export function normalizeAiConfig(value = {}, fallback = DEFAULT_AI_CONFIG) {
   const apiKey = String(value.apiKey || "").trim();
   const rawUrl = String(value.grokBaseUrl || "").trim();
-  // 有 Key 时必须使用原地址，禁止把旧 Key 配到默认官方 xAI。
-  const grokBaseUrl = normalizeGrokBaseUrl(rawUrl || (apiKey ? "" : fallback.grokBaseUrl));
+  // 未配置状态允许空地址；带 Key 的配置仍必须有合法地址。
+  const candidateUrl = rawUrl || (apiKey ? "" : fallback.grokBaseUrl);
+  const grokBaseUrl = !candidateUrl && !apiKey ? "" : normalizeGrokBaseUrl(candidateUrl);
   const next = {
     grokBaseUrl,
     grokModel: normalizeGrokModel(value.grokModel || fallback.grokModel),

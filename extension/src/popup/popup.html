@@ -30,19 +30,25 @@
       <label class="setting"><span><b>桌面通知</b><small>同时显示系统通知</small></span><input id="desktopNotifications" type="checkbox" role="switch"></label>
       <label class="setting"><span><b>连接超时自动刷新</b><small>读取 GMGN 底部连接状态</small></span><input id="autoRefreshOnStall" type="checkbox" role="switch"></label>
       <label class="setting"><span><b>成交额提醒名次</b><small>首次进入前 N 名时提醒</small></span><span class="number-wrap"><input id="alertTopN" type="number" min="1" max="100" step="1"><i>名</i></span></label>
+      <label class="setting"><span><b>最低池子（美元）</b><small>0 为关闭，不满足时仍记录币种</small></span><span class="number-wrap"><input id="minLiquidity" type="number" min="0" step="any"></span></label>
+      <label class="setting"><span><b>最低持有者</b><small>0 为关闭，与其他条件同时满足才提醒</small></span><span class="number-wrap"><input id="minHolders" type="number" min="0" step="1"></span></label>
+      <label class="setting"><span><b>最低市值（美元）</b><small>0 为关闭，页面数值未知时不通过已启用条件</small></span><span class="number-wrap"><input id="minMarketCap" type="number" min="0" step="any"></span></label>
       <label class="setting"><span><b>扫描间隔</b><small>页面变化也会立即扫描</small></span><select id="intervalSeconds"><option value="5">5 秒</option><option value="10">10 秒</option><option value="20">20 秒</option><option value="30">30 秒</option><option value="60">60 秒</option></select></label>
       <label class="setting"><span><b>连接异常等待</b><small>持续异常后才刷新</small></span><span class="number-wrap"><input id="connectionTimeoutSeconds" type="number" min="10" max="300" step="5"><i>秒</i></span></label>
       <label class="setting"><span><b>缺席记录保留</b><small>连续未出现后自动删除</small></span><span class="number-wrap"><input id="retentionDays" type="number" min="1" max="365" step="1"><i>天</i></span></label>
+      <label class="setting"><span><b>启用 FOMO 占比</b><small>新提醒算一次；卡片上可刷新或跟随</small></span><input id="fomoEnabled" type="checkbox" role="switch"></label>
     </main>
 
     <section class="pane narrative-pane" id="narrativePane">
       <div class="integration-head"><div><b>Grok API</b><small>和 chanlun-ai 一样，插件直接请求你填写的 AI 地址</small></div><span class="api-status" id="analyzerStatus">未配置</span></div>
       <button id="openSettingsTab" class="open-tab" type="button">在独立页面填写（不会自动关掉）</button>
       <label class="setting"><span><b>自动叙事分析</b><small>仅分析触发提醒的代币</small></span><input id="narrativeEnabled" type="checkbox" role="switch"></label>
+      <label class="setting"><span><b>AI 同时分析数量</b><small>默认 2，可选择 1–3 个任务</small></span><select id="maxConcurrentAnalyses"><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option></select></label>
       <label class="setting"><span><b>Web 搜索</b><small>检索公开网页资料</small></span><input id="enableWebSearch" type="checkbox" role="switch"></label>
       <label class="setting"><span><b>X 搜索</b><small>检索带原帖链接的讨论</small></span><input id="enableXSearch" type="checkbox" role="switch"></label>
       <div class="config-fields">
-        <label><span>接口地址</span><input id="grokBaseUrl" type="url" value="http://192.119.105.12:9434/v1" placeholder="http://192.119.105.12:9434/v1" autocomplete="off" spellcheck="false"></label>
+        <label><span>接口地址</span><input id="grokBaseUrl" type="url" placeholder="http://127.0.0.1:18645/v1" aria-describedby="transportWarning" autocomplete="off" spellcheck="false"></label>
+        <p id="transportWarning" class="transport-warning" role="status" hidden></p>
         <label><span>模型名称</span><input id="grokModelInput" type="text" placeholder="grok-4.6" autocomplete="off" spellcheck="false"></label>
         <label><span>协议</span><select id="grokApiMode"><option value="openai-responses">OpenAI Responses</option><option value="openai-chat">OpenAI Chat Completions</option></select></label>
         <label><span>鉴权</span><select id="grokAuthType"><option value="auto">自动</option><option value="bearer">Authorization: Bearer</option><option value="x-api-key">x-api-key</option></select></label>

@@ -8,13 +8,20 @@ export class GmgnTrendAdapter {
   }
 
   async readTokens(options = {}) {
+    this.lastReadComplete = Boolean(options.deep && this.canRunBackgroundFullScan());
     const initialTable = this.findLeaderboard();
-    if (!initialTable) return [];
+    if (!initialTable) throw this.structureError("找不到热门榜表格");
 
     const headers = this.readHeaders(initialTable);
+    const requiredHeaders = [
+      ["成交额", /成交额|volume/i],
+      ["市值", /市值|market\s*cap|mcap/i],
+    ];
+    const missing = requiredHeaders.filter(([, pattern]) => !headers.some(header => pattern.test(header)));
+    if (missing.length) throw this.structureError(`缺少关键表头：${missing.map(([name]) => name).join("、")}`);
     const tokens = new Map();
     const scroller = this.findScrollContainer(initialTable);
-    const shouldCrawl = options.deep &&
+    const shouldCrawl = this.lastReadComplete &&
       scroller &&
       scroller.scrollHeight > scroller.clientHeight + SCANNER.MIN_SCROLL_DISTANCE;
     if (!shouldCrawl) {
@@ -34,6 +41,23 @@ export class GmgnTrendAdapter {
       ? table.querySelectorAll("thead th")
       : table.querySelectorAll("tr:first-child th");
     return Array.from(nodes, (node) => normalizeText(node.textContent));
+  }
+
+  isLeaderboardPage() {
+    return /^\/trend(?:\/|$)/i.test(this.location.pathname || "/trend");
+  }
+
+  structureError(reason) {
+    const error = new Error(`GMGN 页面结构可能已变化：${reason}`);
+    error.code = "GMGN_STRUCTURE_CHANGED";
+    return error;
+  }
+
+  getCurrentChain() {
+    const selected = new URLSearchParams(this.location.search || "").get("chain");
+    if (selected) return selected;
+    const anchor = this.findLeaderboard()?.querySelector('a[href*="/token/"]');
+    return parseTokenHref(anchor?.getAttribute("href"), this.location.origin)?.chain || "";
   }
 
   collectRenderedTokens(table, headers, tokens) {
@@ -72,6 +96,10 @@ export class GmgnTrendAdapter {
       let position = 0;
       let steps = 0;
       while (steps < SCANNER.MAX_SCROLL_STEPS) {
+        if (!this.canRunBackgroundFullScan()) {
+          this.lastReadComplete = false;
+          break;
+        }
         const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
         const target = Math.min(position, maxTop);
         scroller.scrollTop = target;
@@ -138,7 +166,10 @@ export class GmgnTrendAdapter {
     ) || "";
     const marketCap = findMetric(metrics, ["市值"], ["历史最高"]);
     const price = findMetric(metrics, ["价格"], ["变化", "涨跌"]);
-    const priceChange = marketCap.match(/[+-]?\d+(?:\.\d+)?%/)?.[0] ||
+    const changeHeader = Object.keys(metrics).find(key => /涨跌|变化|change/i.test(key) && !/市值|market\s*cap/i.test(key));
+    const changeCell = changeHeader ? metrics[changeHeader] : "";
+    const priceChange = changeCell.match(/[+-]?\d+(?:\.\d+)?%/)?.[0] ||
+      marketCap.match(/[+-]?\d+(?:\.\d+)?%/)?.[0] ||
       normalizeText(row.textContent).match(/[+-]?\d+(?:\.\d+)?%/)?.[0] || "";
     const socialLinks = Array.from(row.querySelectorAll('a[href^="http"]'))
       .map((link) => link.href)
